@@ -196,7 +196,7 @@ class Agent:
             self.initialize(args)
             return run_web(self, host=args.host, port=args.port)
 
-        if args.loop_input:
+        if args.loop_provider is not None:
             provider = get_input_provider(args.loop_provider, args.loop_interval)
             self.initialize(args)
             BaseNode.set_user_input_provider(provider)

@@ -53,7 +53,7 @@ python main.py --model {MODEL} --api_type {openai|anthropic}
 
 #### 自动化循环模式
 ```bash
-python main.py --model {MODEL} --api_type {openai|anthropic} --loop_input --loop_provider /path/to/provider.py --loop_interval 300
+python main.py --model {MODEL} --api_type {openai|anthropic} --loop_provider /path/to/provider.py --loop_interval 300
 ```
 - `--loop_provider`: 指定一个 Python 文件的绝对路径，文件内需提供 `provider() -> str`。
 - `--loop_interval`: 限制两次任务触发的**最小时间间隔**（秒）。
@@ -77,7 +77,7 @@ python main.py --model {MODEL} --api_type {openai|anthropic} --loop_input --loop
 
 - `--model`：指定使用的模型
 - `--web`：启动 Web 界面
-- `--loop_input`：启用循环输入模式
+- `--loop_provider`：指定循环输入 provider（提供则启用循环输入模式）
 - `--output_path`：指定日志与工作目录存放位置
 
 ## 🙏 致谢
