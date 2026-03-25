@@ -91,19 +91,6 @@ def build_graph(config: AgentConfig):
 
 
 class Agent:
-    _DEFAULT_ENABLED_TOOLS = [
-        "ask_user",
-        "command_run",
-        "file_read",
-        "file_replace",
-        "file_write",
-        "list_dir",
-        "regex_search",
-        "task_status_update",
-        "web_execute_js",
-        "web_scan",
-    ]
-
     def __init__(self):
         pass
 
@@ -153,7 +140,6 @@ class Agent:
             model=args.model,
             api_type=args.api_type,
             stream=not args.no_stream,
-            enabled_tools=list(self._DEFAULT_ENABLED_TOOLS),
         )
         self.config = config
         self.graph = build_graph(config)

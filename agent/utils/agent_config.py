@@ -3,7 +3,18 @@ from pydantic import BaseModel
 
 class AgentConfig(BaseModel):
     api_type: str | None = None
-    enabled_tools: list[str] = []
+    enabled_tools: list[str] = [
+        "ask_user",
+        "command_run",
+        "file_read",
+        "file_replace",
+        "file_write",
+        "list_dir",
+        "regex_search",
+        "task_status_update",
+        "web_execute_js",
+        "web_scan",
+    ]
     logging_dir: str
     max_iters: int = 30
     max_messages: int = 100
