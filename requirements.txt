@@ -1,0 +1,11 @@
+bottle
+bs4
+langchain
+langchain-openai
+langgraph
+pydantic-settings
+requests
+simple-websocket-server
+trafilatura
+trafilatura
+xmltodict

@@ -1,0 +1,16 @@
+{
+    "name": "command_run",
+    "description": "Execute a shell command via system shell (Unix: bash/sh -lc; Windows: cmd /c).",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "command": {
+                "type": "string",
+                "description": "Shell command string."
+            }
+        },
+        "required": [
+            "command"
+        ]
+    }
+}

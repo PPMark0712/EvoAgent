@@ -1,0 +1,31 @@
+{
+    "name": "regex_search",
+    "description": "Search by regex on file path or file content. Returns a single string in result (newline-separated). path_only=true searches file paths; otherwise searches file contents and returns matched lines with numbers.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "regex": {
+                "type": "string",
+                "description": "Python regex pattern."
+            },
+            "file_path": {
+                "type": "string",
+                "description": "Target file or directory path."
+            },
+            "path_only": {
+                "type": "boolean",
+                "description": "If true, search file path and return matched file names; if false, search file contents and return matched lines.",
+                "default": false
+            },
+            "max_entries": {
+                "type": "integer",
+                "description": "Maximum returned entries for both modes. Use 0 for unlimited.",
+                "default": 20
+            }
+        },
+        "required": [
+            "regex",
+            "file_path"
+        ]
+    }
+}

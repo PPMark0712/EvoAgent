@@ -1,0 +1,16 @@
+{
+    "name": "task_status_update",
+    "description": "Update current task status in agent_state.task_status. Use this tool to anchor progress for complex tasks: create a task list early, then update statuses during execution so the agent can stay aligned in subsequent prompts. Input is a JSON string: list[{\"task\": str, \"status\": \"pending\"|\"in_progress\"|\"completed\"}]",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "json_str": {
+                "type": "string",
+                "description": "JSON string: list[{\"task\": task_desc(str), \"status\": \"pending\"|\"in_progress\"|\"completed\"}]"
+            }
+        },
+        "required": [
+            "json_str"
+        ]
+    }
+}

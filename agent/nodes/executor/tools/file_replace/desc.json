@@ -1,0 +1,26 @@
+{
+    "name": "file_replace",
+    "description": "Replace the first occurrence of a string in a file. It is recommended to ensure that old_str is unique to avoid accidental replacement.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "file_path": {
+                "type": "string",
+                "description": "The path to the file to be modified."
+            },
+            "old_string": {
+                "type": "string",
+                "description": "The string to be replaced."
+            },
+            "new_string": {
+                "type": "string",
+                "description": "The string to replace with."
+            }
+        },
+        "required": [
+            "file_path",
+            "old_string",
+            "new_string"
+        ]
+    }
+}

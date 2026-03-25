@@ -1,0 +1,21 @@
+{
+    "name": "web_execute_js",
+    "description": "Execute JavaScript inside a specific browser tab (session) via the Tampermonkey driver. Use switch_tab_id to target the correct tab; do not try to \"click\" tabs via page DOM.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "script": {
+                "type": "string",
+                "description": "JavaScript code to execute inside the target page. Prefer navigation via location.href/window.open(...,'_self') to keep the same connected tab."
+            },
+            "switch_tab_id": {
+                "type": "string",
+                "description": "Optional. Target tab/session id returned by web_scan metadata.tabs[].id. If omitted, uses the current active tab in the driver.",
+                "default": null
+            }
+        },
+        "required": [
+            "script"
+        ]
+    }
+}

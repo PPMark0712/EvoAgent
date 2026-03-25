@@ -1,0 +1,20 @@
+{
+    "name": "web_scan",
+    "description": "Get page content and the browser tab list. First call should use mode=tabs_only to discover current tabs and pick a valid switch_tab_id. If no tabs are available, open a page via command_run (system browser) and then call web_scan(mode=tabs_only) again.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "switch_tab_id": {
+                "type": "string",
+                "description": "Optional. If provided, switch to this tab before scanning.",
+                "default": null
+            },
+            "mode": {
+                "type": "string",
+                "description": "Scan mode. tabs_only: only return tab list. simplified_html: return filtered HTML (lighter, better for LLM). text_only: return filtered plain text.",
+                "default": "simplified_html"
+            }
+        },
+        "required": []
+    }
+}

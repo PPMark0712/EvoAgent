@@ -1,0 +1,16 @@
+{
+    "name": "ask_user",
+    "description": "Ask the user a question and get their input. Usage principle: avoid using this unless (1) the user explicitly requires a final confirmation/decision, or (2) you have already tried multiple reasonable approaches and repeatedly failed (e.g., tool calls fail, parsing keeps failing, environment constraints, or alternative strategies all lead to dead ends) and you need one key piece of information to unblock progress. Do not use ask_user for trivial choices.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "question": {
+                "type": "string",
+                "description": "The question to ask the user."
+            }
+        },
+        "required": [
+            "question"
+        ]
+    }
+}

@@ -1,0 +1,31 @@
+{
+    "name": "file_read",
+    "description": "Read content from a specified file, with optional line range and line numbering.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "file_path": {
+                "type": "string",
+                "description": "The absolute path of the file to read."
+            },
+            "start_line": {
+                "type": "integer",
+                "description": "The line number to start reading from (inclusive).",
+                "default": null
+            },
+            "end_line": {
+                "type": "integer",
+                "description": "The line number to stop reading at (inclusive).",
+                "default": null
+            },
+            "line_number": {
+                "type": "boolean",
+                "description": "If true, prepend each line with its line number ('line_number→content').",
+                "default": false
+            }
+        },
+        "required": [
+            "file_path"
+        ]
+    }
+}
