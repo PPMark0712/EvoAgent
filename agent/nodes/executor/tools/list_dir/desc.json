@@ -1,6 +1,6 @@
 {
     "name": "list_dir",
-    "description": "List directory as a tree string up to a maximum depth and entry count; directories show (depth,size). If index.md exists in the listed directory, append its content at the end.",
+    "description": "List directory as a tree string up to a maximum depth and entry count; If index.md exists in the listed directory, append its content at the end.",
     "parameters": {
         "type": "object",
         "properties": {
@@ -20,7 +20,7 @@
             },
             "show_info": {
                 "type": "boolean",
-                "description": "Whether to compute and display (depth,size) for each directory. Default true; set false to speed up very large directories.",
+                "description": "Whether to compute and display (depth,size) for each directory, where depth is the max depth to leaf directory under that directory and size is the total number of entries (files+dirs) in its subtree. Both are computed on the full subtree and are independent of max_depth. Default true; set false to speed up very large directories.",
                 "default": true
             }
         },
