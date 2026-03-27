@@ -47,5 +47,6 @@ def get_planner_prompt(thinking_token: str) -> str:
     return prompt.replace("[[thinking_token]]", thinking_token)
 
 
-def get_compressor_prompt() -> str:
-    return _read_prompt_file("compressor.md")
+def get_compressor_prompt(thinking_token: str) -> str:
+    prompt = _read_prompt_file("compressor.md")
+    return prompt.replace("[[thinking_token]]", thinking_token)
