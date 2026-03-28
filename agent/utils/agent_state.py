@@ -42,6 +42,6 @@ def serialize_agent_state(state: AgentState) -> dict:
         "tool_iters": state["tool_iters"],
         "task_status": state["task_status"],
         "continuous_tool_error": state["continuous_tool_error"],
-        "last_worker_usage": state.get("last_worker_usage", {}),
+        "last_worker_usage": state["last_worker_usage"],
     }
     return serializable_state
