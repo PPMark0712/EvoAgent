@@ -68,7 +68,17 @@ def build_graph(config: AgentConfig):
                 last_message_content = json.dumps(last_message_content, ensure_ascii=False)
             except Exception:
                 last_message_content = str(last_message_content)
-        if "<toolcall>" in last_message_content and "</toolcall>" in last_message_content:
+        start = last_message_content.find("<toolcall>")
+        if start < 0:
+            return "user"
+        end = last_message_content.rfind("</toolcall>")
+        if end < 0 or end < start:
+            return "user"
+        end += len("</toolcall>")
+        g1 = last_message_content[:start]
+        g2 = last_message_content[start:end]
+        g3 = last_message_content[end:]
+        if len(g2) > (len(g1) + len(g3)) * 0.5:
             return "executor"
         return "user"
 
