@@ -1,3 +1,4 @@
+import json
 import os
 import re
 import time
@@ -244,6 +245,8 @@ class ExecutorNode(BaseNode):
         is_error = any(tool_result["status"] in ("error", "failed") for tool_result in tool_results)
         if is_error and continuous_tool_error + 1 == self.config.max_tool_error:
             response_content += f"\n连续{self.config.max_tool_error}次错误调用，请调用ask_user工具以询问解决方法"
+        if next_task_status is not None:
+            response_content += "\n<task_status>\n" + json.dumps(next_task_status, ensure_ascii=False) + "\n</task_status>"
 
         response = HumanMessage(content=response_content, additional_kwargs={"source": "tool"})
         self.emit_messages([response], self.emit_message_type)

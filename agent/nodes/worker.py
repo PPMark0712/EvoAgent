@@ -1,5 +1,3 @@
-import json
-
 from langchain.messages import AIMessage, SystemMessage
 from langchain_core.messages import BaseMessageChunk
 
@@ -14,6 +12,13 @@ class WorkerNode(BaseNode):
     def __init__(self, config: AgentConfig, tool_names: list[str]):
         super().__init__("Worker")
         self.config = config
+        try:
+            tools = register_tools(["list_dir"])
+            tool_result = tools["list_dir"](dir_path=self.config.memory_dir, max_depth=1, max_entries=20)
+            if tool_result.get("status") == "success":
+                list_memory_dir = str(tool_result.get("result") or "")
+        except:
+            list_memory_dir = ""
         self.llm = create_chat_model(
             config.model,
             stream=config.stream,
@@ -22,35 +27,24 @@ class WorkerNode(BaseNode):
             retry_delay=config.model_retry_delay,
             **config.model_kwargs,
         )
-        self.base_system_prompt = get_worker_prompt(
+        self.system_prompt = get_worker_prompt(
             tool_names=tool_names,
             max_tool_error=config.max_tool_error,
             working_dir=config.working_dir,
             memory_dir=config.memory_dir,
             thinking_token=config.thinking_token,
+            list_memory_dir=list_memory_dir,
         )
+        self.system_message = SystemMessage(content=self.system_prompt)
+        self.system_message_emitted = False
 
     def run(self, state: AgentState):
-        root_tree = ""
-        try:
-            tools = register_tools(["list_dir"])
-            tool_result = tools["list_dir"](dir_path=self.config.memory_dir, max_depth=1, max_entries=20)
-            if tool_result.get("status") == "success":
-                root_tree = str(tool_result.get("result") or "")
-        except Exception:
-            root_tree = ""
-
-        task_status = state["task_status"]
-        task_status_suffix = ""
-        if task_status:
-            task_status_suffix = "\n\n<task_status>\n" + json.dumps(task_status, ensure_ascii=False) + "\n</task_status>"
-
-        system_prompt = self.base_system_prompt + task_status_suffix
-        if root_tree.strip():
-            system_prompt += "\n\n记忆库根目录结构（自动 list_dir）：\n" + root_tree
+        if not self.system_message_emitted:
+            self.emit_messages([self.system_message], "main")
+            self.system_message_emitted = True
         history_messages = state["messages"][-self.config.max_messages :]
-        messages = [SystemMessage(content=system_prompt), *history_messages]
-
+        messages = [self.system_message, *history_messages]
+        
         if self.config.stream:
             parser = ContentStreamParser(self.config.thinking_token)
             text_parts: list[str] = []

@@ -32,7 +32,10 @@
 [[toolcall_example]]
 
 ## 记忆系统
-记忆目录是你的长期外部记忆（[[memory_dir]]）。记忆根目录及其索引文件 index.md 会稳定地实时更新在你的系统提示词中，作为全局导航。
+记忆目录是你的长期外部记忆，你当前的记忆根目录及其索引文件 index.md 如下：
+<memory_root>
+[[list_memory_dir]]
+</memory_root>
 
 ### 读取原则
 1. 先定位再精读：当你需要读取记忆时，先用 list_dir 查看目标子目录（它会自动读取该目录的 index.md），快速定位最相关的文件。

@@ -27,6 +27,7 @@ def get_worker_prompt(
     working_dir: str,
     memory_dir: str,
     thinking_token: str,
+    list_memory_dir: str,
 ) -> str:
     prompt = _read_prompt_file("worker.md")
     prompt = prompt.replace("[[toolcall_example]]", _read_prompt_file("toolcall_example.md"))
@@ -38,6 +39,7 @@ def get_worker_prompt(
         .replace("[[tool_description]]", _format_tool_descriptions(tool_names))
         .replace("[[max_tool_error]]", str(max_tool_error))
         .replace("[[thinking_token]]", thinking_token)
+        .replace("[[list_memory_dir]]", list_memory_dir)
     )
     return prompt
 
