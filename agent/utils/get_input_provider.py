@@ -8,8 +8,6 @@ from typing import Callable
 
 
 def _load_module_from_path(file_path: str) -> ModuleType:
-    if not os.path.isabs(file_path):
-        raise ValueError(f"loop_provider 必须是绝对路径: {file_path}")
     if not os.path.isfile(file_path):
         raise ValueError(f"loop_provider 文件不存在: {file_path}")
 

@@ -14,6 +14,6 @@ def get_argparser(parser: argparse.ArgumentParser | None = None) -> argparse.Arg
     parser.add_argument("--web", action="store_true", help="Run web server (Bottle + SSE)")
     parser.add_argument("--host", type=str, default="127.0.0.1", help="Web server host")
     parser.add_argument("--port", type=int, default=8000, help="Web server port")
-    parser.add_argument("--loop_provider", type=str, default=None, help="Absolute path to a python file that defines provider() -> str.")
+    parser.add_argument("--loop_provider", type=str, default=None, help="Path to a python file that defines provider() -> str.")
     parser.add_argument("--loop_interval", type=int, default=300, help="Minimum interval in seconds between loop input.")
     return parser
