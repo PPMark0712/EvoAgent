@@ -34,7 +34,7 @@ class WorkerNode(BaseNode):
         root_tree = ""
         try:
             tools = register_tools(["list_dir"])
-            tool_result = tools["list_dir"](dir_path=self.config.memory_dir, max_depth=2, max_entries=200)
+            tool_result = tools["list_dir"](dir_path=self.config.memory_dir, max_depth=1, max_entries=20)
             if tool_result.get("status") == "success":
                 root_tree = str(tool_result.get("result") or "")
         except Exception:
