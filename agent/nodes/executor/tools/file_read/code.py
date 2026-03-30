@@ -1,7 +1,22 @@
+import chardet
+
+
+def detect_encoding(file_path: str) -> str:
+    """使用字节流特征检测文件编码"""
+    with open(file_path, "rb") as f:
+        raw_data = f.read(4096)
+        if not raw_data:
+            return "utf-8"
+        result = chardet.detect(raw_data)
+        encoding = result["encoding"]
+        return encoding if encoding else "utf-8"
+
+
 def file_read(file_path: str, start_line: int = None, end_line: int = None, line_number: bool = False) -> dict:
     """Read content from a specified file, with optional line range and line numbering."""
     try:
-        with open(file_path, 'r') as f:
+        encoding = detect_encoding(file_path)
+        with open(file_path, "r", encoding=encoding) as f:
             lines = f.readlines()
         if start_line is not None:
             lines = lines[start_line - 1:]

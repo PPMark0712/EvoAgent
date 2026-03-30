@@ -1,5 +1,6 @@
 bottle
 bs4
+chardet
 langchain
 langchain-openai
 langgraph
