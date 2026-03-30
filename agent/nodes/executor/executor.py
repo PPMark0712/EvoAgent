@@ -198,7 +198,7 @@ class ExecutorNode(BaseNode):
     def run(self, state: AgentState):
         last_message = state["messages"][-1]
         continuous_tool_error = state["continuous_tool_error"] if self.emit_message_type == "main" else 0
-        force_ask_user = continuous_tool_error >= self.config.max_tool_error
+        force_ask_user = continuous_tool_error >= self.config.max_tool_error and "ask_user" in self.tool_names
 
         try:
             tool_calls = self._parse_tool_call(last_message.content)
