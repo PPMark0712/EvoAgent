@@ -1,16 +1,16 @@
 import os
 
 
-def list_dir(dir_path: str, max_depth: int = 0, max_entries: int = 50, show_info: bool = True) -> dict:
+def list_dir(dir_path: str, max_depth: int = 1, max_entries: int = 20, show_info: bool = True) -> dict:
     try:
         root = os.path.abspath(dir_path)
         max_depth = int(max_depth)
         max_entries = int(max_entries)
         show_info = bool(show_info)
         if max_depth < 0:
-            return {"status": "error", "error": "ValueError: max_depth must be >= 0"}
-        if max_entries < 0:
-            return {"status": "error", "error": "ValueError: max_entries must be >= 0"}
+            return {"status": "error", "error": "ValueError: max_depth must be >= 1"}
+        if max_entries < 1:
+            return {"status": "error", "error": "ValueError: max_entries must be >= 1"}
         if not os.path.isdir(root):
             return {"status": "error", "error": f"NotADirectoryError: {root}"}
 

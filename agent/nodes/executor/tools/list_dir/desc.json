@@ -10,13 +10,13 @@
             },
             "max_depth": {
                 "type": "number",
-                "description": "Max traversal depth (0 means only current directory).",
-                "default": 0
+                "description": "Max expansion depth below dir_path (1: include only direct children; 2: include grandchildren; etc.).",
+                "default": 1
             },
             "max_entries": {
                 "type": "number",
                 "description": "Max number of returned entries.",
-                "default": 50
+                "default": 20
             },
             "show_info": {
                 "type": "boolean",
