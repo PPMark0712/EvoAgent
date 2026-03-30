@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         EvoAgent Driver
 // @namespace    http://tampermonkey.net/
-// @version      0.3
+// @version      0.1
 // @description  EvoAgent browser driver (execute JS and return results to EvoAgent)
 // @require      https://code.jquery.com/jquery-3.6.0.min.js
 // @author       PPMark
@@ -30,6 +30,76 @@
     let ws;
     let sid;
     let wsPingTimer;
+    let httpFailCount = 0;
+    let httpInFlight = false;
+    let httpRetryTimer;
+    let httpRetryDelayMs = 800;
+    let wsRetryTimer;
+    let usingHttp = false;
+    let wsRetryRequested = false;
+    const MAX_HTTP_FAILS_BEFORE_WS_RETRY = 3;
+    const HTTP_RETRY_MIN_MS = 800;
+    const HTTP_RETRY_MAX_MS = 8000;
+    const BACKEND_STALE_MS = 2000;
+    const BACKEND_PROBE_INTERVAL_MS = 1500;
+    const BACKEND_PROBE_TIMEOUT_MS = 800;
+    const wsHttpProbeUrl = "http://127.0.0.1:18765/";
+
+    function scheduleWsRetry(delayMs) {
+        try {
+            if (wsRetryTimer) {
+                clearTimeout(wsRetryTimer);
+            }
+        } catch {
+        }
+        wsRetryTimer = setTimeout(() => {
+            if (!window.use_ws) {
+                connectWs();
+            }
+        }, delayMs);
+    }
+
+    function scheduleHttpRetry(delayMs) {
+        try {
+            if (httpRetryTimer) {
+                clearTimeout(httpRetryTimer);
+            }
+        } catch {
+        }
+        httpRetryTimer = setTimeout(() => {
+            connectHttp();
+        }, delayMs);
+    }
+
+    let backendProbeTimer;
+
+    function markBackendAlive() {
+        lastBackendOkAt = Date.now();
+    }
+
+    function probeBackend() {
+        const probe = (url) => {
+            GM_xmlhttpRequest({
+                method: "GET",
+                url,
+                timeout: BACKEND_PROBE_TIMEOUT_MS,
+                onload: function (resp) {
+                    if (resp && typeof resp.status === "number" && resp.status > 0) {
+                        markBackendAlive();
+                        refreshConnStatus();
+                    }
+                },
+                onerror: function () {
+                    return;
+                },
+                ontimeout: function () {
+                    return;
+                },
+            });
+        };
+        probe(httpUrl);
+        probe(wsHttpProbeUrl);
+    }
 
     function genSid() {
         try {
@@ -53,6 +123,7 @@
     let statusEl;
     let currentStatus = "disc";
     let lastOkAt = 0;
+    let lastBackendOkAt = 0;
 
     function ensureStatusEl() {
         if (!document.body) {
@@ -78,7 +149,7 @@
             "user-select:none",
             "pointer-events:none",
         ].join(";");
-        el.textContent = "未连接";
+        el.textContent = "EvoAgent未连接";
         document.body.appendChild(el);
         statusEl = el;
         return el;
@@ -100,14 +171,29 @@
         currentStatus = status;
         if (status === "ok") {
             lastOkAt = Date.now();
-            setStatus("已连接", "#16a34a");
+            setStatus("EvoAgent已连接", "#16a34a");
+        } else if (status === "conn") {
+            setStatus("EvoAgent正在连接", "#2563eb");
         } else if (status === "disc") {
-            setStatus("未连接", "#6b7280");
+            setStatus("EvoAgent未连接", "#6b7280");
         } else if (status === "err") {
-            setStatus("未连接", "#dc2626");
+            setStatus("EvoAgent未连接", "#dc2626");
         } else if (status === "exec") {
-            setStatus("已连接", "#16a34a");
+            setStatus("EvoAgent已连接", "#16a34a");
         }
+    }
+
+    function refreshConnStatus() {
+        if (currentStatus === "exec" || currentStatus === "err") {
+            return;
+        }
+        const wsOpen = ws && ws.readyState === WebSocket.OPEN;
+        const backendAlive = Date.now() - lastBackendOkAt <= BACKEND_STALE_MS;
+        if (wsOpen || (usingHttp && backendAlive)) {
+            updateStatus("ok");
+            return;
+        }
+        updateStatus(backendAlive ? "conn" : "disc");
     }
 
     function handleError(id, error, errorSource) {
@@ -291,7 +377,11 @@
         if (window.use_ws) {
             return;
         }
-        updateStatus("disc");
+        if (httpInFlight) {
+            return;
+        }
+        httpInFlight = true;
+        refreshConnStatus();
         GM_xmlhttpRequest({
             method: "POST",
             url: httpUrl + "api/longpoll",
@@ -304,14 +394,24 @@
             }),
             timeout: 8000,
             onload: function (resp) {
+                httpInFlight = false;
                 try {
                     if (resp.status !== 200) {
-                        updateStatus("err", "http failed");
+                        httpFailCount += 1;
+                        httpRetryDelayMs = Math.min(Math.max(httpRetryDelayMs * 1.5, HTTP_RETRY_MIN_MS), HTTP_RETRY_MAX_MS);
+                        usingHttp = false;
+                        lastBackendOkAt = 0;
                         return;
                     }
-                    updateStatus("ok");
+                    usingHttp = true;
+                    markBackendAlive();
+                    httpFailCount = 0;
+                    httpRetryDelayMs = HTTP_RETRY_MIN_MS;
                     const data = JSON.parse(resp.responseText);
                     if (data.id === "" && data.ret === "use ws") {
+                        markBackendAlive();
+                        wsRetryRequested = true;
+                        scheduleWsRetry(0);
                         return;
                     }
                     if (data.id === "") {
@@ -329,26 +429,50 @@
                         });
                     }
                 } finally {
-                    setTimeout(connectHttp, 100);
+                    refreshConnStatus();
+                    if (!window.use_ws) {
+                        scheduleHttpRetry(httpRetryDelayMs);
+                    }
                 }
             },
             onerror: function () {
-                updateStatus("err", "http failed");
-                setTimeout(connectHttp, 500);
+                httpInFlight = false;
+                httpFailCount += 1;
+                httpRetryDelayMs = Math.min(Math.max(httpRetryDelayMs * 1.5, HTTP_RETRY_MIN_MS), HTTP_RETRY_MAX_MS);
+                usingHttp = false;
+                lastBackendOkAt = 0;
+                refreshConnStatus();
+                scheduleHttpRetry(httpRetryDelayMs);
             },
             ontimeout: function () {
-                updateStatus("err", "timeout");
-                setTimeout(connectHttp, 500);
+                httpInFlight = false;
+                httpFailCount += 1;
+                httpRetryDelayMs = Math.min(Math.max(httpRetryDelayMs * 1.5, HTTP_RETRY_MIN_MS), HTTP_RETRY_MAX_MS);
+                usingHttp = false;
+                lastBackendOkAt = 0;
+                refreshConnStatus();
+                scheduleHttpRetry(httpRetryDelayMs);
             },
         });
     }
 
     function connectWs() {
+        if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+            return;
+        }
         ws = new WebSocket(wsUrl);
+        refreshConnStatus();
         let opened = false;
         const fallbackTimer = setTimeout(() => {
             if (!opened && !window.use_ws) {
+                try {
+                    if (ws && ws.readyState === WebSocket.CONNECTING) {
+                        ws.close();
+                    }
+                } catch {
+                }
                 connectHttp();
+                refreshConnStatus();
             }
         }, 1500);
 
@@ -356,7 +480,9 @@
             opened = true;
             clearTimeout(fallbackTimer);
             window.use_ws = true;
-            updateStatus("ok");
+            usingHttp = false;
+            markBackendAlive();
+            refreshConnStatus();
             ws.send(
                 JSON.stringify({
                     type: "ready",
@@ -386,11 +512,14 @@
             if (!opened) {
                 clearTimeout(fallbackTimer);
                 connectHttp();
+                refreshConnStatus();
                 return;
             }
-            updateStatus("disc");
             window.use_ws = false;
-            setTimeout(connectWs, 3000);
+            usingHttp = false;
+            lastBackendOkAt = 0;
+            refreshConnStatus();
+            scheduleWsRetry(3000);
         };
 
         ws.onerror = function () {
@@ -399,9 +528,10 @@
                 clearInterval(wsPingTimer);
                 wsPingTimer = null;
             }
-            updateStatus("err", "ws failed");
             window.use_ws = false;
+            lastBackendOkAt = 0;
             connectHttp();
+            refreshConnStatus();
         };
 
         ws.onmessage = function (e) {
@@ -431,7 +561,14 @@
     function init() {
         if (document.body) {
             ensureStatusEl();
-            updateStatus("disc");
+            try {
+                if (backendProbeTimer) {
+                    clearInterval(backendProbeTimer);
+                }
+            } catch {
+            }
+            probeBackend();
+            backendProbeTimer = setInterval(probeBackend, BACKEND_PROBE_INTERVAL_MS);
             connectWs();
         } else {
             setTimeout(init, 50);
@@ -447,6 +584,18 @@
     }
 
     window.addEventListener("beforeunload", () => {
+        if (backendProbeTimer) {
+            clearInterval(backendProbeTimer);
+            backendProbeTimer = null;
+        }
+        if (wsRetryTimer) {
+            clearTimeout(wsRetryTimer);
+            wsRetryTimer = null;
+        }
+        if (httpRetryTimer) {
+            clearTimeout(httpRetryTimer);
+            httpRetryTimer = null;
+        }
         if (wsPingTimer) {
             clearInterval(wsPingTimer);
             wsPingTimer = null;
