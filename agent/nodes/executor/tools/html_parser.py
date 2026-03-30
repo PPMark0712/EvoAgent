@@ -105,14 +105,31 @@ class HtmlParser:
             if isinstance(t, Tag):
                 yield t
 
+    def _maybe_preserve_space_around_removed_node(self, node: Any) -> None:
+        if node is None:
+            return
+        prev = getattr(node, "previous_sibling", None)
+        nxt = getattr(node, "next_sibling", None)
+        if not isinstance(prev, NavigableString) or not isinstance(nxt, NavigableString):
+            return
+        prev_text = str(prev)
+        nxt_text = str(nxt)
+        if not prev_text or not nxt_text:
+            return
+        if prev_text[-1].isspace() or nxt_text[0].isspace():
+            return
+        prev.replace_with(NavigableString(prev_text + self.space_token))
+
     def _drop_noise(self, x: Any) -> Any:
         soup = x
         if not isinstance(soup, BeautifulSoup):
             return x
         for t in list(self._iter_tags(soup)):
             if t.name and t.name.lower() in self.drop_tags:
+                self._maybe_preserve_space_around_removed_node(t)
                 t.decompose()
         for c in list(soup.find_all(string=lambda v: isinstance(v, Comment))):
+            self._maybe_preserve_space_around_removed_node(c)
             c.extract()
         return soup
 
@@ -185,6 +202,7 @@ class HtmlParser:
             changed = False
             for t in list(self._iter_tags(soup)):
                 if self._is_effectively_empty(t):
+                    self._maybe_preserve_space_around_removed_node(t)
                     t.decompose()
                     changed = True
         return soup
@@ -207,6 +225,9 @@ class HtmlParser:
         return self._compact_html(root.decode()).replace(self.space_token, " ")
 
     def _normalize_output(self, text: Any) -> Any:
+        if not isinstance(text, str):
+            text = str(text)
+        text = text.replace(self.space_token, " ")
         for pattern, repl in self.regex_replacements:
             text = pattern.sub(repl, text)
 
