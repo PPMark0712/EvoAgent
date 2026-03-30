@@ -187,8 +187,9 @@ class ExecutorNode(BaseNode):
             status = tool_result["status"]
             result_str = tool_result["result"] if status == "success" else tool_result["error"]
             result_str = str(result_str)
-            if len(result_str) > 50000:
-                result_str = result_str[:50000] + "...[Truncated]"
+            max_chars = self.config.tool_result_max_chars
+            if max_chars > 0 and len(result_str) > max_chars:
+                result_str = result_str[:max_chars] + "...[Truncated]"
             formatted_result = f"<{name}><status>{status}</status><return>\n{result_str}\n</return></{name}>"
             formatted_results += f"{formatted_result}\n"
         formatted_results += "</tool_results>"

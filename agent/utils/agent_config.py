@@ -35,5 +35,6 @@ class AgentConfig(BaseModel):
     thinking_token: str = "thinking"
     tool_call_sleep_time: float = 1.0
     tool_call_timeout: float = 60.0
+    tool_result_max_chars: int = 20000
     token_to_compress: int = 50000
     working_dir: str
