@@ -36,12 +36,8 @@ class WorkerNode(BaseNode):
             list_memory_dir=list_memory_dir,
         )
         self.system_message = SystemMessage(content=self.system_prompt)
-        self.system_message_emitted = False
 
     def run(self, state: AgentState):
-        if not self.system_message_emitted:
-            self.emit_messages([self.system_message], "main")
-            self.system_message_emitted = True
         history_messages = state["messages"][-self.config.max_messages :]
         messages = [self.system_message, *history_messages]
         

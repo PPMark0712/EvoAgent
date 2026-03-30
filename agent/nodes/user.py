@@ -1,15 +1,19 @@
-from langchain.messages import HumanMessage
+from langchain.messages import HumanMessage, SystemMessage
 
 from .base import BaseNode
 from ..utils import AgentConfig, AgentState
 
 
 class UserNode(BaseNode):
-    def __init__(self, config: AgentConfig):
+    def __init__(self, config: AgentConfig, system_message_to_show: SystemMessage = None):
         super().__init__("User")
         self.config = config
+        self.system_message_to_show = system_message_to_show
 
     def run(self, state: AgentState):
+        if self.system_message_to_show:
+            self.emit_messages([self.system_message_to_show], "main")
+            self.system_message_to_show = None
         user_input = self.get_user_input("User input: ")
         message = HumanMessage(content=user_input, additional_kwargs={"source": "user"})
         self.emit_messages([message], "main")

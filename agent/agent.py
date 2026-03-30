@@ -32,15 +32,10 @@ def build_graph(config: AgentConfig):
     tool_names = list(config.enabled_tools)
 
     # Add nodes
-    workflow.add_node("user", UserNode(config))
+    worker_node = WorkerNode(config, tool_names=tool_names)
+    workflow.add_node("user", UserNode(config, system_message_to_show=worker_node.system_message))
     workflow.add_node("compressor", CompressorNode(config))
-    workflow.add_node(
-        "worker",
-        WorkerNode(
-            config,
-            tool_names=tool_names,
-        ),
-    )
+    workflow.add_node("worker", worker_node)
     workflow.add_node(
         "executor",
         ExecutorNode(
