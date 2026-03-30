@@ -15,7 +15,7 @@ def _to_xml(data) -> str:
             result += f"<item>\n{_to_xml(v)}\n</item>\n"
     else:
         result = str(data)
-    return result
+    return result.rstrip()
 
 
 _HTML_PARSER = HtmlParser()

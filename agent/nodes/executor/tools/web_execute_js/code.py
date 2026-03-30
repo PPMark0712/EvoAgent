@@ -21,7 +21,7 @@ def web_execute_js(script: str, switch_tab_id=None) -> dict:
                     result += f"<{k}>\n{_to_xml(v)}\n</{k}>\n"
             else:
                 result = str(data)
-            return result
+            return result.rstrip()
 
         driver: TampermonkeyDriver = get_driver()
         if len(driver.get_all_sessions()) == 0:
