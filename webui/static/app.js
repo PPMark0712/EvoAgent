@@ -158,6 +158,28 @@ function renderMarkdown(contentEl, text) {
   let fenceLang = "";
   let fenceLines = [];
 
+  const isTableSepLine = (ln) => {
+    const s = String(ln || "");
+    return /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(s);
+  };
+
+  const splitTableRow = (ln) => {
+    let s = String(ln || "").trim();
+    if (s.startsWith("|")) s = s.slice(1);
+    if (s.endsWith("|")) s = s.slice(0, -1);
+    return s.split("|").map((c) => c.trim());
+  };
+
+  const alignFromSep = (cell) => {
+    const s = String(cell || "").trim();
+    const left = s.startsWith(":");
+    const right = s.endsWith(":");
+    if (left && right) return "center";
+    if (right) return "right";
+    if (left) return "left";
+    return "";
+  };
+
   const pushParagraph = (paraLines) => {
     const p = document.createElement("p");
     for (let idx = 0; idx < paraLines.length; idx++) {
@@ -261,6 +283,59 @@ function renderMarkdown(contentEl, text) {
       continue;
     }
 
+    const nextLine = lines[i + 1] ?? "";
+    if (line.includes("|") && isTableSepLine(nextLine) && !line.trimStart().startsWith(">")) {
+      const headerCells = splitTableRow(line);
+      const sepCells = splitTableRow(nextLine);
+      const aligns = sepCells.map(alignFromSep);
+      const cols = Math.max(headerCells.length, sepCells.length);
+
+      const wrap = document.createElement("div");
+      wrap.className = "table-wrap";
+      const table = document.createElement("table");
+      wrap.append(table);
+
+      const thead = document.createElement("thead");
+      const headTr = document.createElement("tr");
+      for (let c = 0; c < cols; c++) {
+        const th = document.createElement("th");
+        const align = aligns[c] || "";
+        if (align) th.style.textAlign = align;
+        renderInline(th, headerCells[c] || "");
+        headTr.append(th);
+      }
+      thead.append(headTr);
+      table.append(thead);
+
+      const tbody = document.createElement("tbody");
+      i += 2;
+      while (i < lines.length) {
+        const rowLine = lines[i] ?? "";
+        if (!rowLine.trim()) break;
+        if (!rowLine.includes("|")) break;
+        if (rowLine.match(/^```([a-zA-Z0-9_-]+)?\s*$/)) break;
+        if (rowLine.match(/^(#{1,6})\s+/)) break;
+        if (rowLine.trimStart().startsWith(">")) break;
+        if (rowLine.match(/^\s*[-*+]\s+/)) break;
+        if (rowLine.match(/^\s*\d+\.\s+/)) break;
+
+        const rowCells = splitTableRow(rowLine);
+        const tr = document.createElement("tr");
+        for (let c = 0; c < cols; c++) {
+          const td = document.createElement("td");
+          const align = aligns[c] || "";
+          if (align) td.style.textAlign = align;
+          renderInline(td, rowCells[c] || "");
+          tr.append(td);
+        }
+        tbody.append(tr);
+        i += 1;
+      }
+      table.append(tbody);
+      frag.append(wrap);
+      continue;
+    }
+
     const paraLines = [];
     while (i < lines.length) {
       const cur = lines[i] ?? "";
@@ -270,10 +345,12 @@ function renderMarkdown(contentEl, text) {
       if (cur.trimStart().startsWith(">")) break;
       if (cur.match(/^\s*[-*+]\s+/)) break;
       if (cur.match(/^\s*\d+\.\s+/)) break;
+      const maybeSep = lines[i + 1] ?? "";
+      if (cur.includes("|") && isTableSepLine(maybeSep) && !cur.trimStart().startsWith(">")) break;
       paraLines.push(cur);
       i += 1;
     }
-    pushParagraph(paraLines);
+    if (paraLines.length) pushParagraph(paraLines);
   }
 
   contentEl.append(frag);
@@ -368,6 +445,8 @@ function appendMessage(role, text, opts) {
     renderToolDetails(content, text);
   } else if (opts && opts.parseTags) {
     renderParsedAssistant(content, text);
+  } else if (opts && opts.markdown) {
+    renderMarkdown(content, text);
   } else {
     renderContent(content, text);
   }
@@ -492,7 +571,7 @@ es.onmessage = async (e) => {
   if (ev.type === "llm_stream" && ev.data && ev.data.message_type === "main") {
     streamingText += String(ev.data.delta || "");
     const m = ensureStreaming();
-    renderContent(m.content, streamingText);
+    renderParsedAssistant(m.content, streamingText);
     scrollToBottom(false);
     return;
   }
@@ -540,7 +619,7 @@ es.onmessage = async (e) => {
       if (t === "human" && src === "tool") appendMessage("system", c, { render: "tool" });
       else if (t === "human") appendMessage("user", c);
       else if (t === "ai") appendMessage("assistant", c, { parseTags: true });
-      else if (t === "system") appendMessage("system", c);
+      else if (t === "system") appendMessage("system", c, { markdown: true });
     }
     return;
   }

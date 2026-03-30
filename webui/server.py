@@ -129,7 +129,7 @@ def run_web(agent, *, host: str = "127.0.0.1", port: int = 8000):
             return traceback.format_exc()
 
     def _run_agent():
-        agent.run(extra_emitters=[broadcast], run_id=run_id, emit_to_terminal=True)
+        agent.run(extra_emitters=[broadcast], run_id=run_id, emit_to_terminal=False)
 
     threading.Thread(target=_run_agent, daemon=True).start()
 

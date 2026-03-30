@@ -183,6 +183,30 @@ body {
 }
 .content pre code { background: transparent; border: 0; padding: 0; border-radius: 0; }
 
+.content .table-wrap {
+  margin-top: 10px;
+  overflow-x: auto;
+}
+.content .table-wrap table {
+  width: max-content;
+  min-width: 100%;
+  border-collapse: collapse;
+  border-spacing: 0;
+}
+.content .table-wrap th,
+.content .table-wrap td {
+  border: 1px solid var(--border);
+  padding: 8px 10px;
+  vertical-align: top;
+}
+.content .table-wrap th {
+  font-weight: 700;
+  background: rgba(238, 232, 213, 0.55);
+}
+.content .table-wrap tr:nth-child(even) td {
+  background: rgba(238, 232, 213, 0.28);
+}
+
 .tool-details {
   margin-top: 4px;
 }
