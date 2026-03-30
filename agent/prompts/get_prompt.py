@@ -30,9 +30,14 @@ def get_worker_prompt(
     list_memory_dir: str,
 ) -> str:
     prompt = _read_prompt_file("worker.md")
-    prompt = prompt.replace("[[toolcall_example]]", _read_prompt_file("toolcall_example.md"))
+    if list_memory_dir:
+        if "[index.md]" in list_memory_dir:
+            list_memory_dir = "```\n" + list_memory_dir.replace("[index.md]", "```\n<index.md>") + "\n</index.md>"
+        else:
+            list_memory_dir = "```\n" + list_memory_dir + "\n```"
     prompt = (
         prompt.replace("[[operator_system]]", os.name)
+        .replace("[[toolcall_example]]", _read_prompt_file("toolcall_example.md"))
         .replace("[[project_root]]", _get_project_root())
         .replace("[[working_dir]]", working_dir)
         .replace("[[memory_dir]]", memory_dir)

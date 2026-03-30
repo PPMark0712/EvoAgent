@@ -11,10 +11,10 @@ class UserNode(BaseNode):
         self.system_message_to_show = system_message_to_show
 
     def run(self, state: AgentState):
+        user_input = self.get_user_input("User input: ")
         if self.system_message_to_show:
             self.emit_messages([self.system_message_to_show], "main")
             self.system_message_to_show = None
-        user_input = self.get_user_input("User input: ")
         message = HumanMessage(content=user_input, additional_kwargs={"source": "user"})
         self.emit_messages([message], "main")
         state_update = {
