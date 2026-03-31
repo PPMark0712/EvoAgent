@@ -1,30 +1,38 @@
 import json
+import multiprocessing as mp
 import os
 import re
 import time
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 
 import xmltodict
 from langchain.messages import HumanMessage
 
 from .tools import read_tool_descriptions, register_tools
 from .tools.TampermonkeyDriver import init_driver
-from ..base import BaseNode
+from ..base import BaseNode, Interrupted
 from ...utils import AgentConfig, AgentState
 
 
+def _run_tool_in_subprocess(result_q, wd: str, tn: str, ta: dict):
+    try:
+        os.chdir(wd)
+        tools = register_tools([tn], runtime=None)
+        result_q.put(tools[tn](**ta))
+    except Exception as e:
+        result_q.put({"status": "error", "error": f"{type(e).__name__}: {str(e)}"})
+
+
 class ExecutorNode(BaseNode):
-    def __init__(self, config: AgentConfig, tool_names: list[str], working_dir: str | None = None, message_type: str = "main"):
+    def __init__(self, config: AgentConfig, tool_names: list[str], working_dir: str | None = None):
         super().__init__("Executor")
         self.config = config
         self.working_dir = working_dir or config.working_dir
         self.tool_names = list(tool_names)
         self.tool_param_types = self._load_tool_param_types()
         self.thinking_token = config.thinking_token
-        self.emit_message_type = message_type
         if any(x in self.tool_names for x in ("web_scan", "web_execute_js")):
             try:
-                init_driver(timeout=self.config.tool_call_timeout * 0.8)
+                init_driver(timeout=min(self.config.tool_call_timeout * 0.8, 10))
             except Exception:
                 pass
 
@@ -35,12 +43,11 @@ class ExecutorNode(BaseNode):
         tool_descriptions = read_tool_descriptions()
         tool_param_types = {}
         for tool_name, tool_desc in tool_descriptions.items():
-            parameters = (tool_desc or {}).get("parameters") or {}
-            properties = (parameters.get("properties") or {})
+            parameters = tool_desc["parameters"]
+            properties = parameters["properties"]
             for param_name, param_desc in properties.items():
-                param_type = (param_desc or {}).get("type")
-                if param_type:
-                    tool_param_types.setdefault(tool_name, {})[param_name] = param_type
+                param_type = param_desc["type"]
+                tool_param_types.setdefault(tool_name, {})[param_name] = param_type
         return tool_param_types
 
     def _extract_toolcall_xml(self, content: str) -> str:
@@ -157,17 +164,41 @@ class ExecutorNode(BaseNode):
                 tools = self._get_tools()
                 return tools[tool_name](**tool_args)
 
-            if timeout is not None and timeout > 0:
-                with ThreadPoolExecutor(max_workers=1) as pool:
-                    future = pool.submit(_run)
+            if tool_name == "ask_user":
+                return _run()
+
+            ctx = mp.get_context("spawn")
+            q: mp.Queue = ctx.Queue()
+            p = ctx.Process(target=_run_tool_in_subprocess, args=(q, working_dir, tool_name, tool_args), daemon=True)
+            p.start()
+            start = time.time()
+            while True:
+                if self.should_interrupt():
                     try:
-                        return future.result(timeout=timeout)
-                    except FuturesTimeoutError:
-                        return {
-                            "status": "timeout",
-                            "error": f"TimeoutError: tool '{tool_name}' exceeded {timeout}s",
-                        }
-            return _run()
+                        p.terminate()
+                        p.join(timeout=0.5)
+                        if p.is_alive():
+                            p.kill()
+                            p.join(timeout=0.5)
+                    finally:
+                        raise Interrupted()
+
+                if timeout is not None and timeout > 0 and time.time() - start > timeout:
+                    try:
+                        p.terminate()
+                        p.join(timeout=0.5)
+                        if p.is_alive():
+                            p.kill()
+                            p.join(timeout=0.5)
+                    finally:
+                        return {"status": "timeout", "error": f"TimeoutError: tool '{tool_name}' exceeded {timeout}s"}
+
+                try:
+                    return q.get(timeout=0.1)
+                except Exception:
+                    if not p.is_alive():
+                        break
+            return {"status": "error", "error": f"RuntimeError: tool '{tool_name}' exited without result"}
         except Exception as e:
             return {
                 "status": "error",
@@ -196,8 +227,9 @@ class ExecutorNode(BaseNode):
         return formatted_results
 
     def run(self, state: AgentState):
+        self.check_interrupt()
         last_message = state["messages"][-1]
-        continuous_tool_error = state["continuous_tool_error"] if self.emit_message_type == "main" else 0
+        continuous_tool_error = state["continuous_tool_error"]
         force_ask_user = continuous_tool_error >= self.config.max_tool_error and "ask_user" in self.tool_names
 
         try:
@@ -214,10 +246,11 @@ class ExecutorNode(BaseNode):
                 if continuous_tool_error >= self.config.max_tool_error:
                     content += f"\n连续{self.config.max_tool_error}次错误调用，请调用ask_user工具以询问解决方法"
                 response = HumanMessage(content=content, additional_kwargs={"source": "tool"})
-                self.emit_messages([response], self.emit_message_type)
-                state_update = {"messages": [response]}
-                if self.emit_message_type == "main":
-                    state_update["continuous_tool_error"] = continuous_tool_error
+                self.emit_messages([response], "main")
+                state_update = {
+                    "continuous_tool_error": continuous_tool_error,
+                    "messages": [response],
+                }
                 return state_update
 
         if force_ask_user:
@@ -227,15 +260,19 @@ class ExecutorNode(BaseNode):
         tool_results = []
         next_task_status = None
         for tool_call in tool_calls:
+            self.check_interrupt()
             try:
                 tool_result = self._execute_tool_call(tool_call)
                 tool_result["name"] = tool_call["name"]
+            except Interrupted:
+                raise
             except Exception as e:
                 tool_result = {
                     "name": tool_call["name"],
                     "status": "error",
                     "error": f"{type(e).__name__}: {str(e)}",
                 }
+            self.check_interrupt()
             time.sleep(self.config.tool_call_sleep_time)
             if tool_call.get("name") == "task_status_update" and isinstance(tool_result, dict):
                 ts = tool_result.get("task_status")
@@ -250,14 +287,13 @@ class ExecutorNode(BaseNode):
             response_content += "\n<task_status>\n" + json.dumps(next_task_status, ensure_ascii=False) + "\n</task_status>"
 
         response = HumanMessage(content=response_content, additional_kwargs={"source": "tool"})
-        self.emit_messages([response], self.emit_message_type)
+        self.emit_messages([response], "main")
         next_continuous_tool_error = 0 if force_ask_user else (continuous_tool_error + 1 if is_error else 0)
         state_update = {
+            "continuous_tool_error": next_continuous_tool_error,
             "messages": [response],
+            "tool_iters": state["tool_iters"] + len(tool_calls),
         }
-        if self.emit_message_type == "main":
-            state_update["tool_iters"] = state["tool_iters"] + len(tool_calls)
-            state_update["continuous_tool_error"] = next_continuous_tool_error
         if next_task_status is not None:
             state_update["task_status"] = next_task_status
         return state_update

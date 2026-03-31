@@ -16,7 +16,6 @@ class MessageSaver:
         self._fps_by_type: dict[str, tuple[Any, Any]] = {}
 
         self._fps_by_type["main"] = self._open_pair(self.messages_dir)
-        self._fps_by_type["compressor"] = self._open_pair(os.path.join(self.messages_dir, "compressor"))
 
     def _open_pair(self, dir_path: str):
         os.makedirs(dir_path, exist_ok=True)
@@ -25,9 +24,8 @@ class MessageSaver:
         return open(jsonl_path, "a", encoding="utf-8"), open(md_path, "a", encoding="utf-8")
 
     def close(self):
-        if getattr(self, "_events_jsonl_fp", None):
-            self._events_jsonl_fp.close()
-        fps_by_type = getattr(self, "_fps_by_type", None) or {}
+        self._events_jsonl_fp.close()
+        fps_by_type = self._fps_by_type
         closed = set()
         for pair in fps_by_type.values():
             for fp in pair:
@@ -42,12 +40,12 @@ class MessageSaver:
         self._events_jsonl_fp.write(json.dumps(event, ensure_ascii=False) + "\n")
         self._events_jsonl_fp.flush()
 
-        event_type = event.get("type")
+        event_type = event["type"]
         if event_type != "messages":
             return
-        data = event.get("data") or {}
-        message_type = data.get("message_type") or "main"
-        messages = data.get("messages") or []
+        data = event["data"]
+        message_type = data["message_type"]
+        messages = data["messages"]
         if not isinstance(messages, list):
             return
 
@@ -55,9 +53,9 @@ class MessageSaver:
         for message_dict in messages:
             jsonl_fp.write(json.dumps(message_dict, ensure_ascii=False) + "\n")
 
-            msg_type = (message_dict.get("type") or "").strip()
-            msg_data = message_dict.get("data") or {}
-            content = msg_data.get("content")
+            msg_type = message_dict["type"].strip()
+            msg_data = message_dict["data"]
+            content = msg_data["content"]
             md_fp.write(f"{'=' * 10} {msg_type} {'=' * 10}\n")
             md_fp.write("" if content is None else str(content))
             md_fp.write("\n")
@@ -66,25 +64,23 @@ class MessageSaver:
         md_fp.flush()
 
     def emit_to_terminal(self, event: dict[str, Any]):
-        event_type = event.get("type")
+        event_type = event["type"]
         if event_type != "messages":
             return
-        data = event.get("data") or {}
-        message_type = data.get("message_type") or "main"
+        data = event["data"]
+        message_type = data["message_type"]
         if message_type != "main":
             return
-        messages = data.get("messages") or []
+        messages = data["messages"]
         if not isinstance(messages, list):
             return
 
-        out = getattr(sys, "stdout", None)
-        if out is None:
-            return
+        out = sys.stdout
 
         for message_dict in messages:
-            msg_type = (message_dict.get("type") or "").strip()
-            msg_data = message_dict.get("data") or {}
-            content = msg_data.get("content")
+            msg_type = message_dict["type"].strip()
+            msg_data = message_dict["data"]
+            content = msg_data["content"]
             out.write(f"{'=' * 10} {msg_type} {'=' * 10}\n")
             out.write("" if content is None else str(content))
             out.write("\n")
@@ -94,9 +90,7 @@ class MessageSaver:
             pass
 
     def _get_fps(self, message_type: str):
-        if not message_type:
-            message_type = "main"
-        return self._fps_by_type.get(message_type) or self._fps_by_type["main"]
+        return self._fps_by_type["main"]
 
     def append_messages(self, messages: Iterable[BaseMessage], message_type: str = "main"):
         message_dicts = messages_to_dict(list(messages))

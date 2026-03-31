@@ -82,7 +82,7 @@ def list_dir(dir_path: str, max_depth: int = 1, max_entries: int = 20, show_info
             for i, child in enumerate(children):
                 if printed_entries >= max_entries:
                     truncated = True
-                    lines.append(prefix + "… (truncated)")
+                    lines.append(prefix + "… (truncated, consider lower max_depth or larger max_entries)")
                     return
                 is_last = i == len(children) - 1
                 connector = "└── " if is_last else "├── "

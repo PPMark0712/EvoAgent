@@ -1,4 +1,6 @@
 import logging
+import readline
+import threading
 from abc import ABC, abstractmethod
 from typing import Any, Callable
 
@@ -7,12 +9,18 @@ from langchain_core.messages import messages_to_dict
 from ..utils import AgentState, MessageSaver
 
 
+class Interrupted(Exception):
+    pass
+
+
 class BaseNode(ABC):
     _message_saver: MessageSaver | None = None
     _emitters: list[Callable[[dict], Any]] | None = None
     _run_id: str | None = None
     _user_input_provider: Callable[[], str] | None = None
     _tool_runtime: Any | None = None
+    _interrupt_events: dict[str, threading.Event] = {}
+    _interrupt_lock = threading.Lock()
 
     @classmethod
     def set_message_saver(cls, message_saver: MessageSaver | None):
@@ -25,6 +33,12 @@ class BaseNode(ABC):
     @classmethod
     def set_run_id(cls, run_id: str | None):
         cls._run_id = run_id
+        if run_id is None:
+            return
+        with cls._interrupt_lock:
+            if run_id not in cls._interrupt_events:
+                cls._interrupt_events[run_id] = threading.Event()
+            cls._interrupt_events[run_id].clear()
 
     @classmethod
     def set_user_input_provider(cls, provider: Callable[[], str] | None):
@@ -33,6 +47,37 @@ class BaseNode(ABC):
     @classmethod
     def set_tool_runtime(cls, runtime: Any | None):
         cls._tool_runtime = runtime
+
+    @classmethod
+    def request_interrupt(cls, run_id: str | None = None):
+        rid = cls._run_id if run_id is None else run_id
+        if rid is None:
+            return
+        with cls._interrupt_lock:
+            if rid not in cls._interrupt_events:
+                cls._interrupt_events[rid] = threading.Event()
+            cls._interrupt_events[rid].set()
+
+    @classmethod
+    def clear_interrupt(cls, run_id: str | None = None):
+        rid = cls._run_id if run_id is None else run_id
+        if rid is None:
+            return
+        with cls._interrupt_lock:
+            if rid not in cls._interrupt_events:
+                cls._interrupt_events[rid] = threading.Event()
+            cls._interrupt_events[rid].clear()
+
+    def should_interrupt(self) -> bool:
+        rid = BaseNode._run_id
+        if rid is None:
+            return False
+        with BaseNode._interrupt_lock:
+            return BaseNode._interrupt_events[rid].is_set()
+
+    def check_interrupt(self) -> None:
+        if self.should_interrupt():
+            raise Interrupted()
 
     def __init__(self, name: str):
         super().__init__()
@@ -44,12 +89,12 @@ class BaseNode(ABC):
         pass
 
     def _emit(self, event_type: str, data: dict):
-        emitters = self._emitters or []
-        run_id = self._run_id
-        if not emitters or run_id is None:
+        if self._emitters is None:
             return
-        event = {"run_id": run_id, "type": event_type, "data": data}
-        for emitter in list(emitters):
+        if self._run_id is None:
+            return
+        event = {"run_id": self._run_id, "type": event_type, "data": data}
+        for emitter in list(self._emitters):
             try:
                 emitter(event)
             except Exception as e:
@@ -81,6 +126,15 @@ class BaseNode(ABC):
         self._emit("node_start", {"node": self.name, "message_type": "main"})
         try:
             state_update = self.run(state)
+        except KeyboardInterrupt:
+            if self.name == "User":
+                raise
+            BaseNode.request_interrupt()
+            self.emit_messages([], "main", metadata={"node": self.name, "interrupted": True})
+            raise Interrupted()
+        except Interrupted:
+            self.emit_messages([], "main", metadata={"node": self.name, "interrupted": True})
+            raise
         except Exception as e:
             self.logger.error(f"{e.__class__.__name__}: {str(e)}")
             self._emit(

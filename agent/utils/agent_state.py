@@ -8,40 +8,40 @@ def _merge_messages(left: List[BaseMessage], right: List[BaseMessage]) -> List[B
     if not right:
         return left
     first = right[0]
-    additional_kwargs = getattr(first, "additional_kwargs", None) or {}
+    additional_kwargs = first.additional_kwargs
     if additional_kwargs.get("_reset_messages") is True:
-        try:
-            cleaned = []
-            for m in right:
-                ak = dict(getattr(m, "additional_kwargs", None) or {})
-                if "_reset_messages" in ak:
-                    ak.pop("_reset_messages", None)
-                    setattr(m, "additional_kwargs", ak)
-                cleaned.append(m)
-            return cleaned
-        except Exception:
-            return right
+        cleaned = []
+        for m in right:
+            ak = m.additional_kwargs
+            if "_reset_messages" in ak:
+                ak = dict(ak)
+                ak.pop("_reset_messages")
+                m.additional_kwargs = ak
+            cleaned.append(m)
+        return cleaned
     return left + right
 
 
 class AgentState(TypedDict):
-    messages: Annotated[List[BaseMessage], _merge_messages] = []
-    worker_iters: int = 0
-    user_iters: int = 0
-    tool_iters: int = 0
-    task_status: List[Dict[str, Any]] = []
     continuous_tool_error: int = 0
+    interrupted: bool = False
     last_worker_usage: Dict[str, Any] = {}
+    messages: Annotated[List[BaseMessage], _merge_messages] = []
+    task_status: List[Dict[str, Any]] = []
+    tool_iters: int = 0
+    user_iters: int = 0
+    worker_iters: int = 0
 
 
 def serialize_agent_state(state: AgentState) -> dict:
     serializable_state = {
-        "messages": messages_to_dict(state["messages"]),
-        "worker_iters": state["worker_iters"],
-        "user_iters": state["user_iters"],
-        "tool_iters": state["tool_iters"],
-        "task_status": state["task_status"],
         "continuous_tool_error": state["continuous_tool_error"],
+        "interrupted": state["interrupted"],
         "last_worker_usage": state["last_worker_usage"],
+        "messages": messages_to_dict(state["messages"]),
+        "task_status": state["task_status"],
+        "tool_iters": state["tool_iters"],
+        "user_iters": state["user_iters"],
+        "worker_iters": state["worker_iters"],
     }
     return serializable_state

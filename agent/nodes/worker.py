@@ -1,5 +1,4 @@
 from langchain.messages import AIMessage, SystemMessage
-from langchain_core.messages import BaseMessageChunk
 
 from .base import BaseNode
 from .executor.tools import register_tools
@@ -12,13 +11,14 @@ class WorkerNode(BaseNode):
     def __init__(self, config: AgentConfig, tool_names: list[str]):
         super().__init__("Worker")
         self.config = config
+        list_memory_dir = ""
         try:
             tools = register_tools(["list_dir"])
             tool_result = tools["list_dir"](dir_path=self.config.memory_dir, max_depth=1, max_entries=20)
-            if tool_result.get("status") == "success":
-                list_memory_dir = str(tool_result.get("result") or "")
-        except:
-            list_memory_dir = ""
+            if tool_result["status"] == "success":
+                list_memory_dir = str(tool_result["result"])
+        except Exception:
+            pass
         self.llm = create_chat_model(
             config.model,
             stream=config.stream,
@@ -38,6 +38,7 @@ class WorkerNode(BaseNode):
         self.system_message = SystemMessage(content=self.system_prompt)
 
     def run(self, state: AgentState):
+        self.check_interrupt()
         history_messages = state["messages"][-self.config.max_messages :]
         messages = [self.system_message, *history_messages]
         
@@ -46,6 +47,7 @@ class WorkerNode(BaseNode):
             text_parts: list[str] = []
             full_response = None
             for chunk in self.llm.stream(messages):
+                self.check_interrupt()
                 full_response = chunk if full_response is None else full_response + chunk
                 delta = parser.feed(chunk.content)
                 if delta:
@@ -59,6 +61,7 @@ class WorkerNode(BaseNode):
             response = AIMessage(content=final_text, response_metadata=full_response.response_metadata, usage_metadata=full_response.usage_metadata)
             usage_metadata = full_response.usage_metadata
         else:
+            self.check_interrupt()
             response = self.llm.invoke(messages)
             usage_metadata = response.usage_metadata
             if not isinstance(response.content, str):
@@ -69,9 +72,11 @@ class WorkerNode(BaseNode):
                 )
 
         self.emit_messages([response], "main")
+        if usage_metadata is None:
+            self.logger.warning("usage_metadata is None")
         state_update = {
+            "last_worker_usage": usage_metadata,
             "messages": [response],
             "worker_iters": state["worker_iters"] + 1,
-            "last_worker_usage": usage_metadata,
         }
         return state_update

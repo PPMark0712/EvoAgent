@@ -129,7 +129,7 @@ def run_web(agent, *, host: str = "127.0.0.1", port: int = 8000):
             return traceback.format_exc()
 
     def _run_agent():
-        agent.run(extra_emitters=[broadcast], run_id=run_id, emit_to_terminal=False)
+        agent._run_graph(extra_emitters=[broadcast], run_id=run_id, emit_to_terminal=False)
 
     threading.Thread(target=_run_agent, daemon=True).start()
 
@@ -137,7 +137,13 @@ def run_web(agent, *, host: str = "127.0.0.1", port: int = 8000):
     def api_send():
         data = request.json or {}
         text = data.get("text")
+        BaseNode.clear_interrupt(run_id)
         input_queue.put("" if text is None else str(text))
+        return {"status": "success"}
+
+    @app.post("/api/interrupt")
+    def api_interrupt():
+        BaseNode.request_interrupt(run_id)
         return {"status": "success"}
 
     @app.post("/api/ask_user_reply")
@@ -150,6 +156,7 @@ def run_web(agent, *, host: str = "127.0.0.1", port: int = 8000):
         q = ask_waiters.get(str(ask_id))
         if q is None:
             return {"status": "error", "error": "unknown id"}
+        BaseNode.clear_interrupt(run_id)
         q.put("" if text is None else str(text))
         return {"status": "success"}
 

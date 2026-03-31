@@ -1,3 +1,4 @@
+import readline
 from ..runtime import ToolRuntime
 
 _runtime: ToolRuntime | None = None

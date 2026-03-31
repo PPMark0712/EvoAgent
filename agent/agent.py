@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import re
 import shutil
 import uuid
 from datetime import datetime
@@ -16,10 +17,12 @@ from .nodes import (
     UserNode,
     WorkerNode,
 )
+from .nodes.base import Interrupted
 from .utils import (
     AgentConfig,
     AgentState,
     MessageSaver,
+    SqliteCheckpointer,
     get_input_provider,
     serialize_agent_state,
 )
@@ -51,9 +54,11 @@ def build_graph(config: AgentConfig):
     def _should_compress(state: AgentState) -> bool:
         if len(state["messages"]) <= 8:
             return False
-        return state["last_worker_usage"]["input_tokens"] >= config.token_to_compress
+        return state["last_worker_usage"].get("input_tokens", 0) >= config.token_to_compress
 
     def _decide_after_user(state: AgentState):
+        if state["interrupted"]:
+            return "user"
         if _should_compress(state):
             return "compressor"
         return "worker"
@@ -62,36 +67,40 @@ def build_graph(config: AgentConfig):
     workflow.add_edge("compressor", "worker")
 
     def _decide_after_worker(state: AgentState):
+        if state["interrupted"]:
+            return "user"
         last_message_content = state["messages"][-1].content
         if not isinstance(last_message_content, str):
             try:
                 last_message_content = json.dumps(last_message_content, ensure_ascii=False)
             except Exception:
                 last_message_content = str(last_message_content)
-        start = last_message_content.find("<toolcall>")
-        if start < 0:
-            return "user"
-        end = last_message_content.rfind("</toolcall>")
-        if end < 0 or end < start:
-            return "user"
-        end += len("</toolcall>")
-        g1 = last_message_content[:start]
-        g2 = last_message_content[start:end]
-        g3 = last_message_content[end:]
-        if len(g2) > (len(g1) + len(g3)) * 0.5:
+        thinking_token = config.thinking_token
+        pattern = rf"^\s*<{thinking_token}>.*?</{thinking_token}>.*?<toolcall>.*?</toolcall>\s*$"
+        if re.fullmatch(pattern, last_message_content, re.DOTALL):
             return "executor"
         return "user"
 
     workflow.add_conditional_edges("worker", _decide_after_worker)
 
     def _decide_after_executor(state: AgentState):
+        if state["interrupted"]:
+            return "user"
         if _should_compress(state):
             return "compressor"
         return "worker"
 
     workflow.add_conditional_edges("executor", _decide_after_executor)
 
-    graph = workflow.compile()
+    checkpointer = None
+    if config.checkpoint_dir:
+        try:
+            db_path = os.path.join(config.checkpoint_dir, "graph.sqlite")
+            checkpointer = SqliteCheckpointer(db_path)
+        except Exception:
+            checkpointer = None
+
+    graph = workflow.compile(checkpointer=checkpointer)
     return graph
 
 
@@ -105,46 +114,47 @@ class Agent:
             run_dir = f"{args.save_name}_{ts}"
         else:
             run_dir = ts
-        args.output_path = os.path.join(args.output_path, run_dir)
-        args.working_dir = os.path.join(args.output_path, "working")
-        args.logging_dir = os.path.join(args.output_path, "logging")
+        output_path = os.path.join(args.output_path, run_dir)
+        working_dir = os.path.join(output_path, "working")
+        logging_dir = os.path.join(output_path, "logging")
+        checkpoint_dir = os.path.join(output_path, "checkpoint")
+        memory_dir = args.memory_dir if os.path.isabs(args.memory_dir) else os.path.abspath(args.memory_dir)
 
         try:
-            os.makedirs(args.output_path)
+            os.makedirs(output_path)
         except OSError:
-            raise RuntimeError(f"Output path {args.output_path} already exists!")
+            raise RuntimeError(f"Output path {output_path} already exists!")
 
-        os.makedirs(args.working_dir, exist_ok=True)
-        os.makedirs(args.logging_dir, exist_ok=True)
+        os.makedirs(working_dir, exist_ok=True)
+        os.makedirs(logging_dir, exist_ok=True)
+        os.makedirs(checkpoint_dir, exist_ok=True)
 
-        log_file = os.path.join(args.logging_dir, "agent.log")
+        log_file = os.path.join(logging_dir, "agent.log")
         logging.basicConfig(
             level=logging.INFO,
             format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
             handlers=[logging.FileHandler(log_file), logging.StreamHandler()],
             force=True,
         )
-        logging.info(f"Run dir: {args.output_path}")
+        logging.info(f"Run dir: {output_path}")
 
-        if not os.path.isabs(args.memory_dir):
-            args.memory_dir = os.path.abspath(args.memory_dir)
-
-        if not os.path.exists(args.memory_dir):
+        if not os.path.exists(memory_dir):
             template_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "memory_template"))
-            shutil.copytree(template_dir, args.memory_dir)
-            logging.info(f"Initialized memory dir from template: {args.memory_dir}")
+            shutil.copytree(template_dir, memory_dir)
+            logging.info(f"Initialized memory dir from template: {memory_dir}")
 
-        memory_backup_dir = os.path.join(args.output_path, "memory_backup")
-        shutil.copytree(args.memory_dir, memory_backup_dir)
+        memory_backup_dir = os.path.join(output_path, "memory_backup")
+        shutil.copytree(memory_dir, memory_backup_dir)
         logging.info(f"Memory backup dir: {memory_backup_dir}")
 
         config = AgentConfig(
-            working_dir=os.path.abspath(args.working_dir),
-            memory_dir=args.memory_dir,
-            logging_dir=os.path.abspath(args.logging_dir),
-            model=args.model,
             api_type=args.api_type,
+            checkpoint_dir=os.path.abspath(checkpoint_dir),
+            logging_dir=os.path.abspath(logging_dir),
+            memory_dir=memory_dir,
+            model=args.model,
             stream=not args.no_stream,
+            working_dir=os.path.abspath(working_dir),
         )
         self.config = config
         self.graph = build_graph(config)
@@ -160,27 +170,65 @@ class Agent:
             raise RuntimeError("Agent is not initialized with config")
 
         init_state = AgentState(
-            messages=[],
-            worker_iters=0,
-            user_iters=0,
-            tool_iters=0,
-            task_status=[],
             continuous_tool_error=0,
+            interrupted=False,
             last_worker_usage={},
+            messages=[],
+            task_status=[],
+            tool_iters=0,
+            user_iters=0,
+            worker_iters=0,
         )
         run_id = run_id or uuid.uuid4().hex
         logging.info(f"Agent run id: {run_id}")
         saver = MessageSaver(self.config.logging_dir, run_id=run_id)
         BaseNode.set_run_id(run_id)
-        extra_emitters = list(extra_emitters or [])
+        if extra_emitters is None:
+            extra_emitters = []
+        current_node = {"value": ""}
+
+        def _track_node(event: dict):
+            t = event["type"]
+            if t == "node_start":
+                current_node["value"] = event["data"]["node"].strip().lower()
+            elif t == "node_end":
+                current_node["value"] = ""
+
         emitters = [saver.emit]
         if emit_to_terminal:
             emitters.append(saver.emit_to_terminal)
         emitters.extend(extra_emitters)
+        emitters.append(_track_node)
         BaseNode.set_emitters(emitters)
         try:
-            final_state = self.graph.invoke(init_state)
-            return serialize_agent_state(final_state)
+            cfg = {"configurable": {"thread_id": run_id, "checkpoint_ns": ""}}
+            input_state: AgentState | None = init_state
+            while True:
+                try:
+                    for _ in self.graph.stream(input_state, config=cfg, stream_mode="values"):
+                        input_state = None
+                    final_state = self.graph.get_state(cfg).values
+                    return serialize_agent_state(final_state)
+                except Interrupted:
+                    BaseNode.clear_interrupt(run_id)
+                    node_key = current_node["value"]
+                    history = list(self.graph.get_state_history(cfg, limit=400))
+                    pre_cur = None
+                    for s in history:
+                        if node_key in s.next:
+                            pre_cur = s
+                            break
+                    if pre_cur is None:
+                        raise
+                    cfg = pre_cur.config
+                    update_values = {
+                        "continuous_tool_error": 0,
+                        "interrupted": True,
+                        "tool_iters": 0,
+                        "worker_iters": 0,
+                    }
+                    cfg = self.graph.update_state(cfg, update_values, as_node="worker")
+                    input_state = None
         finally:
             BaseNode.set_emitters(None)
             BaseNode.set_run_id(None)

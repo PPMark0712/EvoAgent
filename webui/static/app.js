@@ -6,14 +6,70 @@ const statusEl = document.getElementById("status");
 const jumpBtn = document.getElementById("jump");
 let streamingText = "";
 let streamingMsgEl = null;
+let initialSystemPromptShown = false;
 let askPendingId = null;
 let askPendingQuestion = "";
 let thinkingToken = "think";
+let inFlight = false;
+let inputComposing = false;
+let stopRequested = false;
+let streamPending = false;
+let streamRafId = 0;
+let streamQueue = "";
+let streamDisplayText = "";
 
 function setStatus(text, cls) {
   statusEl.textContent = text;
   statusEl.classList.remove("ok", "bad");
   if (cls) statusEl.classList.add(cls);
+}
+
+function renderStreamingPlain(contentEl, text) {
+  const t = String(text || "");
+  const first = contentEl.firstElementChild;
+  if (first && first.classList.contains("block")) {
+    first.textContent = t;
+    return;
+  }
+  contentEl.textContent = "";
+  const div = document.createElement("div");
+  div.className = "block";
+  div.textContent = t;
+  contentEl.append(div);
+}
+
+function _takeNChars(s, n) {
+  if (!s) return ["", ""];
+  const arr = Array.from(String(s));
+  if (n <= 0) return ["", arr.join("")];
+  return [arr.slice(0, n).join(""), arr.slice(n).join("")];
+}
+
+function scheduleStreamRender() {
+  if (streamPending) return;
+  streamPending = true;
+  const tick = () => {
+    streamRafId = requestAnimationFrame(() => {
+      if (!streamingMsgEl || stopRequested) {
+        streamPending = false;
+        streamRafId = 0;
+        return;
+      }
+      if (!streamQueue) {
+        streamPending = false;
+        streamRafId = 0;
+        return;
+      }
+      const n = 1 + Math.floor(Math.random() * 3);
+      const [take, rest] = _takeNChars(streamQueue, n);
+      streamQueue = rest;
+      streamDisplayText += take;
+      renderStreamingPlain(streamingMsgEl.content, streamDisplayText);
+      scrollToBottom(false);
+      tick();
+    });
+  };
+  tick();
 }
 
 
@@ -425,6 +481,19 @@ function renderParsedAssistant(contentEl, text) {
   }
 }
 
+function toolcallDominates(text) {
+  const s = String(text || "");
+  const start = s.indexOf("<toolcall>");
+  if (start < 0) return false;
+  const end0 = s.lastIndexOf("</toolcall>");
+  if (end0 < 0 || end0 < start) return false;
+  const end = end0 + "</toolcall>".length;
+  const g1 = s.slice(0, start);
+  const g2 = s.slice(start, end);
+  const g3 = s.slice(end);
+  return g2.length > (g1.length + g3.length) * 0.5;
+}
+
 function appendMessage(role, text, opts) {
   clearEmpty();
 
@@ -472,7 +541,7 @@ function appendMessage(role, text, opts) {
 
   wrap.append(avatar, bubble);
   chatInnerEl.append(wrap);
-  scrollToBottom(false);
+  scrollToBottom(Boolean(opts && opts.forceScroll));
   updateJump();
 
   return { wrap, content, meta };
@@ -487,6 +556,11 @@ function ensureStreaming() {
 
 function clearStreaming() {
   streamingText = "";
+  streamDisplayText = "";
+  streamQueue = "";
+  if (streamRafId) cancelAnimationFrame(streamRafId);
+  streamRafId = 0;
+  streamPending = false;
   if (streamingMsgEl) streamingMsgEl.wrap.remove();
   streamingMsgEl = null;
 }
@@ -501,6 +575,11 @@ function finalizeStreamingToParsed(finalText) {
   }
   renderParsedAssistant(streamingMsgEl.content, finalText);
   streamingText = "";
+  streamDisplayText = "";
+  streamQueue = "";
+  if (streamRafId) cancelAnimationFrame(streamRafId);
+  streamRafId = 0;
+  streamPending = false;
   streamingMsgEl = null;
   return true;
 }
@@ -528,6 +607,18 @@ function setAskPending(id, question) {
   }
 }
 
+function setSendMode(mode) {
+  if (mode === "stop") {
+    sendBtn.textContent = "停止";
+    sendBtn.classList.remove("btn-primary");
+    sendBtn.classList.add("btn-danger");
+    return;
+  }
+  sendBtn.textContent = "发送";
+  sendBtn.classList.remove("btn-danger");
+  sendBtn.classList.add("btn-primary");
+}
+
 function autosize() {
   inputEl.style.height = "0px";
   const next = Math.min(160, Math.max(42, inputEl.scrollHeight));
@@ -535,6 +626,12 @@ function autosize() {
 }
 
 inputEl.addEventListener("input", autosize);
+inputEl.addEventListener("compositionstart", () => {
+  inputComposing = true;
+});
+inputEl.addEventListener("compositionend", () => {
+  inputComposing = false;
+});
 autosize();
 
 const es = new EventSource("/events");
@@ -563,21 +660,29 @@ es.onmessage = async (e) => {
     const q = String(ev.data.question || "");
     const id = String(ev.data.id || "");
     setAskPending(id, q);
+    inFlight = false;
+    stopRequested = false;
+    setSendMode("send");
     appendMessage("system", `需要你确认：\n${q}\n\n请在下方输入并发送。`);
     inputEl.focus();
     return;
   }
 
   if (ev.type === "llm_stream" && ev.data && ev.data.message_type === "main") {
-    streamingText += String(ev.data.delta || "");
-    const m = ensureStreaming();
-    renderParsedAssistant(m.content, streamingText);
-    scrollToBottom(false);
+    if (stopRequested) return;
+    const delta = String(ev.data.delta || "");
+    streamingText += delta;
+    streamQueue += delta;
+    ensureStreaming();
+    scheduleStreamRender();
+    inFlight = true;
+    if (!askPendingId) setSendMode("stop");
     return;
   }
 
   if (ev.type === "messages" && ev.data && ev.data.message_type === "main") {
     const msgs = Array.isArray(ev.data.messages) ? ev.data.messages : [];
+    const interrupted = Boolean(ev.data.metadata && ev.data.metadata.interrupted);
     let streamedFinal = null;
     if (streamingMsgEl) {
       streamedFinal = msgs.find((x) => String(x.type || "").trim() === "ai") || null;
@@ -594,10 +699,12 @@ es.onmessage = async (e) => {
                 }
               })();
         finalizeStreamingToParsed(finalText);
+      } else if (interrupted) {
+        finalizeStreamingToParsed(streamingText);
       } else if (msgs.length) {
         clearStreaming();
       }
-    } else if (msgs.length) {
+    } else if (msgs.length && !interrupted) {
       clearStreaming();
     }
 
@@ -619,24 +726,70 @@ es.onmessage = async (e) => {
       if (t === "human" && src === "tool") appendMessage("system", c, { render: "tool" });
       else if (t === "human") appendMessage("user", c);
       else if (t === "ai") appendMessage("assistant", c, { parseTags: true });
-      else if (t === "system") appendMessage("system", c, { markdown: true });
+      else if (t === "system") {
+        appendMessage("system", c, { forceScroll: !initialSystemPromptShown, markdown: true });
+        initialSystemPromptShown = true;
+      }
+    }
+    const aiMsg = msgs.find((x) => String(x.type || "").trim() === "ai") || null;
+    const aiText =
+      aiMsg && aiMsg.data && aiMsg.data.content != null
+        ? typeof aiMsg.data.content === "string"
+          ? aiMsg.data.content
+          : (() => {
+              try {
+                return JSON.stringify(aiMsg.data.content);
+              } catch {
+                return String(aiMsg.data.content);
+              }
+            })()
+        : "";
+
+    if (interrupted) {
+      inFlight = false;
+      stopRequested = false;
+      if (!askPendingId) setSendMode("send");
+    } else if (aiMsg) {
+      if (toolcallDominates(aiText)) {
+        inFlight = true;
+        if (!askPendingId) setSendMode("stop");
+      } else {
+        inFlight = false;
+        if (!askPendingId) setSendMode("send");
+      }
     }
     return;
   }
 };
 
 async function send() {
-  const text = inputEl.value || "";
-  if (!text.trim()) return;
-  inputEl.value = "";
-  autosize();
   if (askPendingId) {
+    const text = inputEl.value || "";
+    if (!text.trim()) return;
+    inputEl.value = "";
+    autosize();
     const id = askPendingId;
     setAskPending(null, "");
     appendMessage("user", text);
     await postJson("/api/ask_user_reply", { id, text });
     return;
   }
+
+  if (inFlight) {
+    stopRequested = true;
+    if (streamingMsgEl) {
+      finalizeStreamingToParsed(streamingText);
+    }
+    await postJson("/api/interrupt", {});
+    return;
+  }
+
+  const text = inputEl.value || "";
+  if (!text.trim()) return;
+  inputEl.value = "";
+  autosize();
+  inFlight = true;
+  setSendMode("stop");
   await postJson("/api/send", { text });
 }
 
@@ -644,13 +797,16 @@ sendBtn.addEventListener("click", send);
 inputEl.addEventListener("keydown", (e) => {
   if (e.key !== "Enter") return;
   if (e.shiftKey) return;
+  if (inputComposing || e.isComposing || e.key === "Process") return;
   e.preventDefault();
+  if (inFlight && !askPendingId) return;
   send();
 });
 
 clearBtn.addEventListener("click", () => {
   chatInnerEl.innerHTML =
     '<div class="empty"><div class="empty-title">开始对话</div><div class="empty-subtitle">输入问题后发送，支持 Shift+Enter 换行</div></div>';
+  initialSystemPromptShown = false;
   clearStreaming();
   updateJump();
 });

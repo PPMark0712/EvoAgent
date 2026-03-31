@@ -3,6 +3,7 @@ from pydantic import BaseModel
 
 class AgentConfig(BaseModel):
     api_type: str | None = None
+    checkpoint_dir: str
     enabled_tools: list[str] = [
         "ask_user",
         "command_run",
