@@ -8,6 +8,37 @@ class RetryLLM:
         self._max_retries = max(0, int(max_retries))
         self._retry_delay = max(0.0, float(retry_delay))
 
+    @staticmethod
+    def _is_404_error(err: Exception) -> bool:
+        def _coerce_int(v: Any) -> int | None:
+            if isinstance(v, bool):
+                return None
+            if isinstance(v, int):
+                return v
+            if isinstance(v, str):
+                s = v.strip()
+                if s.isdigit():
+                    try:
+                        return int(s)
+                    except Exception:
+                        return None
+            return None
+
+        for attr in ("status_code", "http_status", "status"):
+            code = _coerce_int(getattr(err, attr, None))
+            if code == 404:
+                return True
+
+        resp = getattr(err, "response", None)
+        if resp is not None:
+            for attr in ("status_code", "status"):
+                code = _coerce_int(getattr(resp, attr, None))
+                if code == 404:
+                    return True
+
+        s = str(err)
+        return "404" in s and "Not Found" in s
+
     def _sleep(self) -> None:
         if self._retry_delay > 0:
             time.sleep(self._retry_delay)
@@ -18,6 +49,8 @@ class RetryLLM:
             try:
                 return self._llm.invoke(*args, **kwargs)
             except Exception as e:
+                if self._is_404_error(e):
+                    raise
                 last_err = e
                 if attempt >= self._max_retries:
                     raise
@@ -35,6 +68,8 @@ class RetryLLM:
                     yield x
                 return
             except Exception as e:
+                if self._is_404_error(e):
+                    raise
                 last_err = e
                 if yielded or attempt >= self._max_retries:
                     raise
@@ -47,6 +82,8 @@ class RetryLLM:
             try:
                 return await self._llm.ainvoke(*args, **kwargs)
             except Exception as e:
+                if self._is_404_error(e):
+                    raise
                 last_err = e
                 if attempt >= self._max_retries:
                     raise
@@ -63,6 +100,8 @@ class RetryLLM:
                     yield x
                 return
             except Exception as e:
+                if self._is_404_error(e):
+                    raise
                 last_err = e
                 if yielded or attempt >= self._max_retries:
                     raise

@@ -11,38 +11,48 @@
     <div class="app">
       <header class="topbar">
         <div class="brand">
-          <div class="brand-mark">E</div>
-          <div class="brand-text">
-            <div class="brand-title">EvoAgent</div>
-            <div class="brand-subtitle">对话</div>
-          </div>
+          <div class="brand-title">EvoAgent</div>
         </div>
         <div class="topbar-right">
           <div id="status" class="status-pill" aria-live="polite">连接中…</div>
-          <button id="clear" class="btn btn-ghost" type="button">清空</button>
         </div>
       </header>
 
-      <main class="chat" aria-label="对话区域">
-        <div id="chatInner" class="chat-inner">
-          <div class="empty">
-            <div class="empty-title">开始对话</div>
-            <div class="empty-subtitle">输入问题后发送，支持 Shift+Enter 换行</div>
+      <div class="body">
+        <aside class="sidebar" aria-label="会话列表">
+          <div class="sidebar-header">
+            <button id="newChat" class="btn btn-primary btn-small" type="button">新建会话</button>
           </div>
-        </div>
-        <button id="jump" class="jump hidden" type="button">回到底部</button>
-      </main>
+          <div id="sessions" class="sessions" role="list"></div>
+        </aside>
 
-      <footer class="composer" aria-label="输入区域">
-        <div class="composer-inner">
-          <textarea id="input" class="input" rows="1" placeholder="给 EvoAgent 发送消息…" spellcheck="false"></textarea>
-          <button id="send" class="btn btn-primary" type="button">发送</button>
+        <div class="right">
+          <main class="chat" aria-label="对话区域">
+            <div id="chatInner" class="chat-inner">
+              <div class="empty">
+                <div class="empty-title">开始对话</div>
+                <div class="empty-subtitle">输入问题后发送，支持 Shift+Enter 换行</div>
+              </div>
+            </div>
+            <div id="loading" class="loading hidden" aria-label="加载中">
+              <div class="loading-spinner"></div>
+              <div class="loading-text">加载中…</div>
+            </div>
+            <button id="jump" class="jump hidden" type="button">回到底部</button>
+          </main>
+
+          <footer class="composer" aria-label="输入区域">
+            <div class="composer-inner">
+              <textarea id="input" class="input" rows="1" placeholder="给 EvoAgent 发送消息…" spellcheck="false"></textarea>
+              <button id="send" class="btn btn-primary" type="button">发送</button>
+            </div>
+            <div class="hint">Enter 发送 · Shift+Enter 换行</div>
+          </footer>
         </div>
-        <div class="hint">Enter 发送 · Shift+Enter 换行</div>
-      </footer>
+      </div>
     </div>
 
     <noscript>此页面需要启用 JavaScript 才能显示事件流。</noscript>
-    <script src="/static/app.js"></script>
+    <script type="module" src="/static/app.js"></script>
   </body>
 </html>

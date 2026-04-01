@@ -17,7 +17,7 @@ class SqliteCheckpointer(BaseCheckpointSaver[str]):
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path, check_same_thread=False)
         conn.execute("PRAGMA journal_mode=WAL;")
-        conn.execute("PRAGMA synchronous=NORMAL;")
+        conn.execute("PRAGMA synchronous=FULL;")
         return conn
 
     def _init_db(self) -> None:
@@ -89,7 +89,7 @@ class SqliteCheckpointer(BaseCheckpointSaver[str]):
         return out
 
     def get_tuple(self, config: RunnableConfig) -> CheckpointTuple | None:
-        thread_id: str = config["configurable"]["thread_id"]
+        run_id: str = config["configurable"]["thread_id"]
         checkpoint_ns: str = config["configurable"]["checkpoint_ns"]
         checkpoint_id = get_checkpoint_id(config)
         with self._connect() as conn:
@@ -100,7 +100,7 @@ class SqliteCheckpointer(BaseCheckpointSaver[str]):
                     FROM checkpoints
                     WHERE thread_id = ? AND checkpoint_ns = ? AND checkpoint_id = ?
                     """,
-                    (thread_id, checkpoint_ns, checkpoint_id),
+                    (run_id, checkpoint_ns, checkpoint_id),
                 ).fetchone()
             else:
                 row = conn.execute(
@@ -111,7 +111,7 @@ class SqliteCheckpointer(BaseCheckpointSaver[str]):
                     ORDER BY checkpoint_id DESC
                     LIMIT 1
                     """,
-                    (thread_id, checkpoint_ns),
+                    (run_id, checkpoint_ns),
                 ).fetchone()
             if row is None:
                 return None
@@ -126,20 +126,20 @@ class SqliteCheckpointer(BaseCheckpointSaver[str]):
                 WHERE thread_id = ? AND checkpoint_ns = ? AND checkpoint_id = ?
                 ORDER BY task_id, idx
                 """,
-                (thread_id, checkpoint_ns, checkpoint_id),
+                (run_id, checkpoint_ns, checkpoint_id),
             ).fetchall()
 
         return CheckpointTuple(
             config={
                 "configurable": {
-                    "thread_id": thread_id,
+                    "thread_id": run_id,
                     "checkpoint_ns": checkpoint_ns,
                     "checkpoint_id": checkpoint_id,
                 }
             },
             checkpoint={
                 **checkpoint_,
-                "channel_values": self._load_blobs(thread_id, checkpoint_ns, checkpoint_["channel_versions"]),
+                "channel_values": self._load_blobs(run_id, checkpoint_ns, checkpoint_["channel_versions"]),
             },
             metadata=metadata,
             pending_writes=[
@@ -149,7 +149,7 @@ class SqliteCheckpointer(BaseCheckpointSaver[str]):
             parent_config=(
                 {
                     "configurable": {
-                        "thread_id": thread_id,
+                        "thread_id": run_id,
                         "checkpoint_ns": checkpoint_ns,
                         "checkpoint_id": parent_checkpoint_id,
                     }
@@ -169,7 +169,7 @@ class SqliteCheckpointer(BaseCheckpointSaver[str]):
     ) -> Iterator[CheckpointTuple]:
         if config is None:
             return iter(())
-        thread_id: str = config["configurable"]["thread_id"]
+        run_id: str = config["configurable"]["thread_id"]
         checkpoint_ns: str = config["configurable"]["checkpoint_ns"]
         before_id = get_checkpoint_id(before) if before else None
         with self._connect() as conn:
@@ -180,7 +180,7 @@ class SqliteCheckpointer(BaseCheckpointSaver[str]):
                 WHERE thread_id = ? AND checkpoint_ns = ?
                 ORDER BY checkpoint_id DESC
                 """,
-                (thread_id, checkpoint_ns),
+                (run_id, checkpoint_ns),
             ).fetchall()
 
         out: list[CheckpointTuple] = []
@@ -195,20 +195,20 @@ class SqliteCheckpointer(BaseCheckpointSaver[str]):
                 CheckpointTuple(
                     config={
                         "configurable": {
-                            "thread_id": thread_id,
+                            "thread_id": run_id,
                             "checkpoint_ns": checkpoint_ns,
                             "checkpoint_id": checkpoint_id,
                         }
                     },
                     checkpoint={
                         **checkpoint_,
-                        "channel_values": self._load_blobs(thread_id, checkpoint_ns, checkpoint_["channel_versions"]),
+                        "channel_values": self._load_blobs(run_id, checkpoint_ns, checkpoint_["channel_versions"]),
                     },
                     metadata=metadata,
                     parent_config=(
                         {
                             "configurable": {
-                                "thread_id": thread_id,
+                                "thread_id": run_id,
                                 "checkpoint_ns": checkpoint_ns,
                                 "checkpoint_id": parent_checkpoint_id,
                             }
@@ -233,7 +233,7 @@ class SqliteCheckpointer(BaseCheckpointSaver[str]):
         new_versions: dict[str, str],
     ) -> RunnableConfig:
         c = checkpoint.copy()
-        thread_id: str = config["configurable"]["thread_id"]
+        run_id: str = config["configurable"]["thread_id"]
         checkpoint_ns: str = config["configurable"]["checkpoint_ns"]
         values: dict[str, Any] = c.pop("channel_values")  # type: ignore[misc]
 
@@ -248,7 +248,7 @@ class SqliteCheckpointer(BaseCheckpointSaver[str]):
                     INSERT OR REPLACE INTO blobs(thread_id, checkpoint_ns, channel, version, value_type, value_blob)
                     VALUES(?,?,?,?,?,?)
                     """,
-                    (thread_id, checkpoint_ns, channel, str(version), v_type, v_blob),
+                    (run_id, checkpoint_ns, channel, str(version), v_type, v_blob),
                 )
 
             c_type, c_blob = self.serde.dumps_typed(c)
@@ -265,7 +265,7 @@ class SqliteCheckpointer(BaseCheckpointSaver[str]):
                 ) VALUES(?,?,?,?,?,?,?,?)
                 """,
                 (
-                    thread_id,
+                    run_id,
                     checkpoint_ns,
                     checkpoint["id"],
                     c_type,
@@ -278,7 +278,7 @@ class SqliteCheckpointer(BaseCheckpointSaver[str]):
 
         return {
             "configurable": {
-                "thread_id": thread_id,
+                "thread_id": run_id,
                 "checkpoint_ns": checkpoint_ns,
                 "checkpoint_id": checkpoint["id"],
             }
@@ -291,7 +291,7 @@ class SqliteCheckpointer(BaseCheckpointSaver[str]):
         task_id: str,
         task_path: str = "",
     ) -> None:
-        thread_id: str = config["configurable"]["thread_id"]
+        run_id: str = config["configurable"]["thread_id"]
         checkpoint_ns: str = config["configurable"]["checkpoint_ns"]
         checkpoint_id: str = config["configurable"]["checkpoint_id"]
         with self._connect() as conn:
@@ -307,7 +307,7 @@ class SqliteCheckpointer(BaseCheckpointSaver[str]):
                     ) VALUES(?,?,?,?,?,?,?,?,?)
                     """,
                     (
-                        thread_id,
+                        run_id,
                         checkpoint_ns,
                         checkpoint_id,
                         task_id,
