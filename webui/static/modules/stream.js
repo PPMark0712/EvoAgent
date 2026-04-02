@@ -1,6 +1,6 @@
 import { state } from "./state.js";
 import { renderParsedAssistant, appendMessage } from "./render.js";
-import { scrollToBottom } from "./ui.js";
+import { isNearBottom, scrollToBottom } from "./ui.js";
 
 function renderStreamingPlain(contentEl, text) {
   const t = String(text || "");
@@ -43,7 +43,7 @@ export function scheduleStreamRender() {
       state.streamQueue = rest;
       state.streamDisplayText += take;
       renderStreamingPlain(state.streamingMsgEl.content, state.streamDisplayText);
-      scrollToBottom(false);
+      scrollToBottom(Boolean(state.streamAutoScroll));
       tick();
     });
   };
@@ -52,6 +52,7 @@ export function scheduleStreamRender() {
 
 export function ensureStreaming() {
   if (state.streamingMsgEl) return state.streamingMsgEl;
+  state.streamAutoScroll = isNearBottom();
   const m = appendMessage("assistant", "", { streaming: true });
   state.streamingMsgEl = m;
   return m;
@@ -77,6 +78,7 @@ export function finalizeStreamingToParsed(finalText) {
     typingEl.remove();
   }
   renderParsedAssistant(state.streamingMsgEl.content, finalText);
+  scrollToBottom(Boolean(state.streamAutoScroll));
   state.streamingText = "";
   state.streamDisplayText = "";
   state.streamQueue = "";

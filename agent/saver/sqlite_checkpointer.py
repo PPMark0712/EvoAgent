@@ -3,7 +3,15 @@ import sqlite3
 from collections.abc import Iterator, Sequence
 from typing import Any
 
-from langgraph.checkpoint.base import BaseCheckpointSaver, Checkpoint, CheckpointMetadata, CheckpointTuple, RunnableConfig, get_checkpoint_id, get_checkpoint_metadata
+from langgraph.checkpoint.base import (
+    BaseCheckpointSaver,
+    Checkpoint,
+    CheckpointMetadata,
+    CheckpointTuple,
+    RunnableConfig,
+    get_checkpoint_id,
+    get_checkpoint_metadata,
+)
 from langgraph.checkpoint.memory import WRITES_IDX_MAP
 
 

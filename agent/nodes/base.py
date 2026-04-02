@@ -1,8 +1,10 @@
 import logging
+import os
 import threading
 from abc import ABC, abstractmethod
 from typing import Any, Callable
 
+from langchain.messages import HumanMessage
 from langchain_core.messages import messages_to_dict
 
 from ..utils import AgentState
@@ -16,6 +18,59 @@ class BaseNode(ABC):
     _tls = threading.local()
     _interrupt_events: dict[str, threading.Event] = {}
     _interrupt_lock = threading.Lock()
+    _run_log_lock = threading.Lock()
+    _run_log_dirs: dict[str, str] = {}
+    _run_file_handlers: dict[str, logging.Handler] = {}
+    _run_router_handler: logging.Handler | None = None
+
+    class _RunLogRouter(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            rid = BaseNode._get_run_id()
+            if rid is None:
+                return
+            with BaseNode._run_log_lock:
+                logging_dir = BaseNode._run_log_dirs.get(rid)
+                if not logging_dir:
+                    return
+                h = BaseNode._run_file_handlers.get(rid)
+                if h is None:
+                    try:
+                        os.makedirs(logging_dir, exist_ok=True)
+                        path = os.path.join(logging_dir, "agent.log")
+                        h = logging.FileHandler(path, encoding="utf-8")
+                        h.setLevel(logging.INFO)
+                        h.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+                        BaseNode._run_file_handlers[rid] = h
+                    except Exception:
+                        return
+            try:
+                h.handle(record)
+            except Exception:
+                return
+
+    @classmethod
+    def set_run_logging_dir(cls, run_id: str, logging_dir: str):
+        if not run_id or not logging_dir:
+            return
+        with cls._run_log_lock:
+            cls._run_log_dirs[run_id] = logging_dir
+            if cls._run_router_handler is None:
+                cls._run_router_handler = cls._RunLogRouter()
+                cls._run_router_handler.setLevel(logging.INFO)
+                logging.getLogger().addHandler(cls._run_router_handler)
+
+    @classmethod
+    def clear_run_logging_dir(cls, run_id: str):
+        if not run_id:
+            return
+        with cls._run_log_lock:
+            cls._run_log_dirs.pop(run_id, None)
+            h = cls._run_file_handlers.pop(run_id, None)
+        if h is not None:
+            try:
+                h.close()
+            except Exception:
+                pass
 
     @classmethod
     def _get_emitters(cls) -> list[Callable[[dict], Any]] | None:
@@ -107,14 +162,14 @@ class BaseNode(ABC):
             except Exception as e:
                 self.logger.error(f"EmitError {type(e).__name__}: {str(e)}")
 
-    def emit_messages(self, messages, message_type: str, metadata: dict | None = None):
-        data = {"message_type": message_type, "messages": messages_to_dict(list(messages))}
+    def emit_messages(self, messages: list, message_type: str, metadata: dict | None = None):
+        data = {"message_type": message_type, "messages": messages_to_dict(messages)}
         if metadata:
             data["metadata"] = metadata
         self._emit("messages", data)
 
     def emit_llm_stream(self, delta: Any, message_type: str):
-        text = "" if delta is None else (delta if isinstance(delta, str) else str(delta))
+        text = "" if delta is None else str(delta)
         if not text:
             return
         self._emit("llm_stream", {"node": self.name, "message_type": message_type, "delta": text})
@@ -143,10 +198,18 @@ class BaseNode(ABC):
             if self.name == "User":
                 raise
             BaseNode.request_interrupt()
-            self.emit_messages([], "main", metadata={"node": self.name, "interrupted": True})
+            self.emit_messages(
+                [HumanMessage(content="Interrupted", additional_kwargs={"source": "user"})],
+                "main",
+                metadata={"node": self.name, "interrupted": True},
+            )
             raise Interrupted()
         except Interrupted:
-            self.emit_messages([], "main", metadata={"node": self.name, "interrupted": True})
+            self.emit_messages(
+                [HumanMessage(content="Interrupted", additional_kwargs={"source": "user"})],
+                "main",
+                metadata={"node": self.name, "interrupted": True},
+            )
             raise
         except Exception as e:
             self.logger.error(f"{e.__class__.__name__}: {str(e)}")

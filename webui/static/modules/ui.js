@@ -1,4 +1,4 @@
-import { chatInnerEl, inputEl, jumpBtn, loadingEl, sendBtn, statusEl } from "./dom.js";
+import { chatInnerEl, chatTitleEl, inputEl, jumpBtn, loadingEl, newChatBtn, sendBtn, statusEl } from "./dom.js";
 import { state } from "./state.js";
 
 export function setLoading(on) {
@@ -11,6 +11,18 @@ export function setStatus(text, cls) {
   statusEl.textContent = text;
   statusEl.classList.remove("ok", "bad");
   if (cls) statusEl.classList.add(cls);
+}
+
+export function setChatTitle(title) {
+  const t = String(title || "").trim();
+  if (!chatTitleEl) return;
+  if (!t) {
+    chatTitleEl.classList.add("hidden");
+    chatTitleEl.textContent = "";
+    return;
+  }
+  chatTitleEl.textContent = t;
+  chatTitleEl.classList.remove("hidden");
 }
 
 export function isNearBottom() {
@@ -38,14 +50,45 @@ export function setAskPending(id, question) {
   state.askPendingId = id || null;
   state.askPendingQuestion = question || "";
   if (state.askPendingId) {
-    inputEl.placeholder = "回复确认问题并发送…";
+    inputEl.placeholder = "回复确认问题并发送…（Shift+Enter 换行）";
   } else {
-    inputEl.placeholder = "给 EvoAgent 发送消息…";
+    inputEl.placeholder = "给 EvoAgent 发消息…（Shift+Enter 换行）";
   }
 }
 
 export function setSendMode(mode) {
   if (!state.activeRunId) {
+    sendBtn.textContent = "发送";
+    sendBtn.classList.remove("btn-danger");
+    sendBtn.classList.add("btn-primary");
+    sendBtn.disabled = true;
+    return;
+  }
+  const activeLoadState = (() => {
+    const list = state.sessionsCache;
+    if (!Array.isArray(list)) return "";
+    const rid = String(state.activeRunId || "").trim();
+    for (const s of list) {
+      const sid = String((s && s.run_id) || "").trim();
+      if (sid && sid === rid) return String((s && s.load_state) || "").trim();
+    }
+    return "";
+  })();
+  if (state.loadingRunIds instanceof Set && state.loadingRunIds.has(state.activeRunId)) {
+    sendBtn.textContent = "加载中";
+    sendBtn.classList.remove("btn-danger");
+    sendBtn.classList.add("btn-primary");
+    sendBtn.disabled = true;
+    return;
+  }
+  if (activeLoadState === "building") {
+    sendBtn.textContent = "加载中";
+    sendBtn.classList.remove("btn-danger");
+    sendBtn.classList.add("btn-primary");
+    sendBtn.disabled = true;
+    return;
+  }
+  if (activeLoadState === "error" || activeLoadState === "closed") {
     sendBtn.textContent = "发送";
     sendBtn.classList.remove("btn-danger");
     sendBtn.classList.add("btn-primary");
@@ -71,7 +114,10 @@ export function autosize() {
 }
 
 export function initUiHandlers() {
-  chatInnerEl.addEventListener("scroll", updateJump);
+  chatInnerEl.addEventListener("scroll", () => {
+    updateJump();
+    if (state.streamingMsgEl && !isNearBottom()) state.streamAutoScroll = false;
+  });
   jumpBtn.addEventListener("click", () => scrollToBottom(true));
   inputEl.addEventListener("input", autosize);
   inputEl.addEventListener("compositionstart", () => {
@@ -90,4 +136,26 @@ export function setInputEnabled(on) {
     autosize();
   }
   setSendMode("send");
+}
+
+export function setBackendDown() {
+  if (state.backendDown) return;
+  state.backendDown = true;
+  try {
+    if (state.es) state.es.close();
+  } catch {
+  }
+  state.es = null;
+  setLoading(false);
+  setStatus("请启动后端后刷新页面", "bad");
+  setInputEnabled(false);
+  newChatBtn.disabled = true;
+
+  if (!document.getElementById("backendDownOverlay")) {
+    const overlay = document.createElement("div");
+    overlay.id = "backendDownOverlay";
+    overlay.innerHTML =
+      '<div class="backend-down-box"><div class="backend-down-title">连接已断开</div><div class="backend-down-sub">请启动后端后刷新页面</div></div>';
+    document.body.append(overlay);
+  }
 }

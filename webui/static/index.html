@@ -9,21 +9,21 @@
   </head>
   <body>
     <div class="app">
-      <header class="topbar">
-        <div class="brand">
+      <div class="shell-top" aria-label="顶部栏">
+        <div class="shell-left">
           <div class="brand-title">EvoAgent</div>
-        </div>
-        <div class="topbar-right">
           <div id="status" class="status-pill" aria-live="polite">连接中…</div>
         </div>
-      </header>
+        <div class="shell-right">
+          <div id="chatTitle" class="chat-titlebar hidden"></div>
+        </div>
+      </div>
 
       <div class="body">
         <aside class="sidebar" aria-label="会话列表">
-          <div class="sidebar-header">
+          <div id="sessions" class="sessions" role="list">
             <button id="newChat" class="btn btn-primary btn-small" type="button">新建会话</button>
           </div>
-          <div id="sessions" class="sessions" role="list"></div>
         </aside>
 
         <div class="right">
@@ -31,7 +31,7 @@
             <div id="chatInner" class="chat-inner">
               <div class="empty">
                 <div class="empty-title">开始对话</div>
-                <div class="empty-subtitle">输入问题后发送，支持 Shift+Enter 换行</div>
+                <div class="empty-subtitle">给 EvoAgent 发消息</div>
               </div>
             </div>
             <div id="loading" class="loading hidden" aria-label="加载中">
@@ -43,10 +43,10 @@
 
           <footer class="composer" aria-label="输入区域">
             <div class="composer-inner">
-              <textarea id="input" class="input" rows="1" placeholder="给 EvoAgent 发送消息…" spellcheck="false"></textarea>
+              <textarea id="input" class="input" rows="1" placeholder="给 EvoAgent 发消息…（Shift+Enter 换行）" spellcheck="false"></textarea>
               <button id="send" class="btn btn-primary" type="button">发送</button>
             </div>
-            <div class="hint">Enter 发送 · Shift+Enter 换行</div>
+            <div class="hint">给 EvoAgent 发消息</div>
           </footer>
         </div>
       </div>

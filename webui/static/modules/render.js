@@ -329,13 +329,24 @@ export function renderToolDetails(contentEl, text) {
 
 export function renderParsedAssistant(contentEl, text) {
   contentEl.textContent = "";
-  const raw = String(text || "");
-  const token = String(state.thinkingToken || "think").trim() || "think";
-  const escaped = token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const tagRe = new RegExp(
-    `<${escaped}\\s*>([\\s\\S]*?)<\\/${escaped}\\s*>|<toolcall\\b[^>]*>[\\s\\S]*?<\\/toolcall\\s*>`,
-    "gi",
-  );
+  let raw = String(text || "");
+  const token = String(state.thinkingToken || "").trim();
+  const escaped = token ? token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") : "";
+  if (token) {
+    const thinkRe = new RegExp(`<${escaped}\\s*>([\\s\\S]*?)<\\/${escaped}\\s*>`, "i");
+    const m = thinkRe.exec(raw);
+    if (m) {
+      const pre = document.createElement("pre");
+      pre.className = "assistant-think";
+      const code = document.createElement("code");
+      code.textContent = String(m[0] || "").trim();
+      pre.append(code);
+      contentEl.append(pre);
+      raw = raw.slice(0, m.index) + raw.slice(m.index + m[0].length);
+    }
+  }
+
+  const tagRe = new RegExp(`<toolcall\\b[^>]*>[\\s\\S]*?<\\/toolcall\\s*>`, "gi");
 
   let lastIndex = 0;
   let m;
@@ -348,21 +359,12 @@ export function renderParsedAssistant(contentEl, text) {
       contentEl.append(main);
     }
 
-    if (m[1] != null) {
-      const pre = document.createElement("pre");
-      pre.className = "assistant-think";
-      const code = document.createElement("code");
-      code.textContent = String(m[1] || "").trim();
-      pre.append(code);
-      contentEl.append(pre);
-    } else {
-      const pre = document.createElement("pre");
-      pre.className = "assistant-toolcall";
-      const code = document.createElement("code");
-      code.textContent = String(m[0] || "").trim();
-      pre.append(code);
-      contentEl.append(pre);
-    }
+    const pre = document.createElement("pre");
+    pre.className = "assistant-toolcall";
+    const code = document.createElement("code");
+    code.textContent = String(m[0] || "").trim();
+    pre.append(code);
+    contentEl.append(pre);
 
     lastIndex = m.index + m[0].length;
   }

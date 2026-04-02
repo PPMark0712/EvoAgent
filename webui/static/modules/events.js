@@ -3,7 +3,7 @@ import { state } from "./state.js";
 import { appendMessage } from "./render.js";
 import { clearStreaming, ensureStreaming, finalizeStreamingToParsed, scheduleStreamRender, toolcallDominates } from "./stream.js";
 import { refreshSessions, renderSessions } from "./sessions.js";
-import { scrollToBottom, setLoading, setSendMode, setAskPending } from "./ui.js";
+import { scrollToBottom, setLoading, setSendMode, setAskPending, setInputEnabled } from "./ui.js";
 
 export async function onEventMessage(e) {
   let ev;
@@ -15,14 +15,21 @@ export async function onEventMessage(e) {
 
   if (ev.type === "run_start") {
     if (ev.data) {
-      if (ev.data.thinking_token) {
-        state.thinkingToken = String(ev.data.thinking_token || "think").trim() || "think";
-      }
+      if (ev.data.thinking_token != null) state.thinkingToken = String(ev.data.thinking_token).trim();
       if (!ev.data.has_history) {
         setLoading(false);
       }
     }
-    clearStreaming();
+    if (ev.run_id && state.loadingRunIds instanceof Set) {
+      state.loadingRunIds.delete(String(ev.run_id));
+      renderSessions(state.sessionsCache);
+    }
+    if (ev.run_id && String(ev.run_id) === state.activeRunId) {
+      setInputEnabled(true);
+    }
+    if (!state.inFlight && !state.streamingMsgEl && !state.streamQueue && !state.streamingText) {
+      clearStreaming();
+    }
     await refreshSessions();
     renderSessions(state.sessionsCache);
     return;
@@ -57,7 +64,9 @@ export async function onEventMessage(e) {
     const interrupted = Boolean(ev.data.metadata && ev.data.metadata.interrupted);
     const history = Boolean(ev.data.metadata && ev.data.metadata.history);
     if (history) {
-      clearStreaming();
+      if (!state.inFlight && !state.streamingMsgEl && !state.streamQueue && !state.streamingText) {
+        clearStreaming();
+      }
       for (const m of msgs) {
         const t = String(m.type || "").trim();
         const raw = m.data && m.data.content != null ? m.data.content : "";

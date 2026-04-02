@@ -1,7 +1,6 @@
 import json
 import logging
 import os
-import re
 import shutil
 import sqlite3
 import uuid
@@ -11,103 +10,19 @@ from typing import Any, Callable
 
 from langchain.messages import SystemMessage
 from langchain_core.messages import messages_to_dict
-from langgraph.graph import START, StateGraph
 
 from webui.server import run_web
-from .nodes import (
-    BaseNode,
-    CompressorNode,
-    ExecutorNode,
-    UserNode,
-    WorkerNode,
-)
-from .nodes.base import Interrupted
+from .agent_graph import build_graph
+from .nodes.base import BaseNode, Interrupted
 from .nodes.executor.tools import register_tools
 from .prompts import get_worker_prompt
+from .saver import MessageSaver
 from .utils import (
     AgentConfig,
     AgentState,
-    MessageSaver,
-    SqliteCheckpointer,
     get_input_provider,
     serialize_agent_state,
 )
-
-
-def build_graph(config: AgentConfig):
-    logging.info(f"building agent graph...")
-    workflow = StateGraph(AgentState)
-
-    tool_names = list(config.enabled_tools)
-
-    # Add nodes
-    worker_node = WorkerNode(config, tool_names=tool_names)
-    workflow.add_node("user", UserNode(config))
-    workflow.add_node("compressor", CompressorNode(config))
-    workflow.add_node("worker", worker_node)
-    workflow.add_node(
-        "executor",
-        ExecutorNode(
-            config,
-            tool_names=tool_names,
-            working_dir=config.working_dir,
-        ),
-    )
-
-    # Add edges
-    workflow.add_edge(START, "user")
-
-    def _should_compress(state: AgentState) -> bool:
-        if len(state["messages"]) <= 8:
-            return False
-        return state["last_worker_usage"].get("input_tokens", 0) >= config.token_to_compress
-
-    def _decide_after_user(state: AgentState):
-        if state["interrupted"]:
-            return "user"
-        if _should_compress(state):
-            return "compressor"
-        return "worker"
-
-    workflow.add_conditional_edges("user", _decide_after_user)
-    workflow.add_edge("compressor", "worker")
-
-    def _decide_after_worker(state: AgentState):
-        if state["interrupted"]:
-            return "user"
-        last_message_content = state["messages"][-1].content
-        if not isinstance(last_message_content, str):
-            try:
-                last_message_content = json.dumps(last_message_content, ensure_ascii=False)
-            except Exception:
-                last_message_content = str(last_message_content)
-        thinking_token = config.thinking_token
-        pattern = rf"^\s*<{thinking_token}>.*?</{thinking_token}>.*?<toolcall>.*?</toolcall>\s*$"
-        if re.fullmatch(pattern, last_message_content, re.DOTALL):
-            return "executor"
-        return "user"
-
-    workflow.add_conditional_edges("worker", _decide_after_worker)
-
-    def _decide_after_executor(state: AgentState):
-        if state["interrupted"]:
-            return "user"
-        if _should_compress(state):
-            return "compressor"
-        return "worker"
-
-    workflow.add_conditional_edges("executor", _decide_after_executor)
-
-    checkpointer = None
-    if config.checkpoint_dir:
-        try:
-            db_path = os.path.join(config.checkpoint_dir, "graph.sqlite")
-            checkpointer = SqliteCheckpointer(db_path)
-        except Exception:
-            checkpointer = None
-
-    graph = workflow.compile(checkpointer=checkpointer)
-    return graph
 
 
 class Agent:
@@ -119,16 +34,17 @@ class Agent:
         self.system_message: SystemMessage | None = None
 
     def initialize(self, args):
+        output_path = args.output_path
         load_path = args.load_path
         if not load_path and args.web:
             best_run_dir = None
             best_ts = -1.0
             try:
-                names = os.listdir(args.output_path)
+                names = os.listdir(output_path)
             except Exception:
                 names = []
             for name in names:
-                run_dir = os.path.join(args.output_path, name)
+                run_dir = os.path.join(output_path, name)
                 if not os.path.isdir(run_dir):
                     continue
                 meta_path = os.path.join(run_dir, "metadata.json")
@@ -157,7 +73,8 @@ class Agent:
                 run_name = f"{args.save_name}_{ts}"
             else:
                 run_name = ts
-            run_dir = os.path.join(args.output_path, run_name)
+            run_dir = os.path.join(output_path, run_name)
+        os.makedirs(run_dir, exist_ok=True)
         metadata_path = os.path.join(run_dir, "metadata.json")
         working_dir = os.path.join(run_dir, "working")
         logging_dir = os.path.join(run_dir, "logging")
@@ -219,9 +136,10 @@ class Agent:
                 shutil.copytree(template_dir, memory_dir)
                 logging.info(f"Initialized memory dir from template: {memory_dir}")
 
-            memory_backup_dir = os.path.join(run_dir, "memory_backup")
-            shutil.copytree(memory_dir, memory_backup_dir)
-            logging.info(f"Memory backup dir: {memory_backup_dir}")
+            if getattr(args, "memory_backup", False):
+                memory_backup_dir = os.path.join(run_dir, "memory_backup")
+                shutil.copytree(memory_dir, memory_backup_dir)
+                logging.info(f"Memory backup dir: {memory_backup_dir}")
         else:
             messages_jsonl_path = os.path.join(logging_dir, "messages", "messages.jsonl")
             history: list[dict] = []
@@ -293,6 +211,8 @@ class Agent:
             }
             with open(metadata_path, "w", encoding="utf-8") as fp:
                 json.dump(meta, fp, ensure_ascii=False, indent=2)
+        if self.resume_run_id:
+            BaseNode.set_run_logging_dir(self.resume_run_id, self.config.logging_dir)
 
     def _run_graph(
         self,
@@ -315,9 +235,10 @@ class Agent:
             worker_iters=0,
         )
         run_id = run_id or uuid.uuid4().hex
+        BaseNode.set_run_id(run_id)
+        BaseNode.set_run_logging_dir(run_id, self.config.logging_dir)
         logging.info(f"Agent run id: {run_id}")
         saver = MessageSaver(self.config.logging_dir, run_id=run_id)
-        BaseNode.set_run_id(run_id)
         if extra_emitters is None:
             extra_emitters = []
         current_node = {"value": ""}
@@ -387,6 +308,7 @@ class Agent:
         finally:
             BaseNode.set_emitters(None)
             BaseNode.set_run_id(None)
+            BaseNode.clear_run_logging_dir(run_id)
             saver.close()
 
     def run(self, args, *, extra_emitters: list[Callable[[dict], Any]] | None = None, emit_to_terminal: bool = True):

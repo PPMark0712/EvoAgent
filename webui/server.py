@@ -38,20 +38,20 @@ def run_web(agent_cls, args, *, host: str = "127.0.0.1", port: int = 8000):
         logging.basicConfig(level=logging.INFO, format="%(message)s")
     logging.info(msg)
 
-    base_output_dir = os.path.abspath(args.output_path)
+    base_output_dir = os.path.abspath(args.output_path or "output")
+    os.makedirs(base_output_dir, exist_ok=True)
     memory_dir = args.memory_dir if os.path.isabs(args.memory_dir) else os.path.abspath(args.memory_dir)
     template_api_type = args.api_type
     template_model = args.model
     template_no_stream = args.no_stream
     show_system_prompt = args.show_system_prompt
     max_graphs = args.max_graphs
+    memory_backup = bool(getattr(args, "memory_backup", False))
 
     class Session:
-        def __init__(self, *, run_id: str, run_dir: str, meta_config: dict, history: list[dict], halted: bool):
+        def __init__(self, *, run_id: str, run_dir: str, halted: bool):
             self.run_id = run_id
             self.run_dir = run_dir
-            self.meta_config = meta_config
-            self.history = history
             self.halted = halted
             self.agent = None
             self.build_error = None
@@ -66,7 +66,7 @@ def run_web(agent_cls, args, *, host: str = "127.0.0.1", port: int = 8000):
 
         def _should_broadcast(self, event: dict) -> bool:
             event_type = event["type"]
-            if event_type in {"run_start", "ask_user"}:
+            if event_type in {"run_start", "ask_user", "session_closed"}:
                 return True
             if event_type == "messages":
                 return event["data"]["message_type"] == "main"
@@ -74,7 +74,7 @@ def run_web(agent_cls, args, *, host: str = "127.0.0.1", port: int = 8000):
                 return event["data"]["message_type"] == "main"
             return False
 
-        def broadcast(self, event: dict):
+        def _broadcast(self, event: dict):
             if not self._should_broadcast(event):
                 return
             payload = json.dumps(event, ensure_ascii=False)
@@ -88,7 +88,7 @@ def run_web(agent_cls, args, *, host: str = "127.0.0.1", port: int = 8000):
             ask_id = uuid.uuid4().hex
             q: queue.Queue[str] = queue.Queue()
             self.ask_waiters[ask_id] = q
-            self.broadcast({"run_id": self.run_id, "type": "ask_user", "data": {"id": ask_id, "question": question}})
+            self._broadcast({"run_id": self.run_id, "type": "ask_user", "data": {"id": ask_id, "question": question}})
             try:
                 while True:
                     if self._closed.is_set():
@@ -100,15 +100,19 @@ def run_web(agent_cls, args, *, host: str = "127.0.0.1", port: int = 8000):
             finally:
                 self.ask_waiters.pop(ask_id, None)
 
-        def close(self):
+        def _close(self, *, reason: str = "closed"):
             self._closed.set()
+            try:
+                self._broadcast({"run_id": self.run_id, "type": "session_closed", "data": {"reason": str(reason)}})
+            except Exception:
+                pass
             BaseNode.request_interrupt(self.run_id)
             try:
                 self.input_queue.put_nowait("")
             except Exception:
                 pass
 
-        def ensure_build_started(self, build_args_factory):
+        def _ensure_build_started(self, build_args_factory):
             with self._lock:
                 if self._build_started:
                     return
@@ -126,21 +130,21 @@ def run_web(agent_cls, args, *, host: str = "127.0.0.1", port: int = 8000):
 
             threading.Thread(target=_build, daemon=True).start()
 
-        def wait_ready(self, timeout: float | None = None) -> bool:
+        def _wait_ready(self, timeout: float | None = None) -> bool:
             return self._ready.wait(timeout=timeout)
 
-        def ensure_runner_started(self):
+        def _ensure_runner_started(self):
             def _start():
-                self.wait_ready(timeout=None)
+                self._wait_ready(timeout=None)
                 if self._closed.is_set():
                     return
                 if self.build_error is not None:
                     return
-                self.start_runner()
+                self._start_runner()
 
             threading.Thread(target=_start, daemon=True).start()
 
-        def start_runner(self):
+        def _start_runner(self):
             with self._lock:
                 if self._runner_started:
                     return
@@ -163,7 +167,7 @@ def run_web(agent_cls, args, *, host: str = "127.0.0.1", port: int = 8000):
                 BaseNode.set_tool_runtime(ToolRuntime(ask_user=self.ask_user))
                 if self.agent is None:
                     raise RuntimeError("Agent is not ready")
-                self.agent._run_graph(extra_emitters=[self.broadcast], run_id=self.run_id, emit_to_terminal=False)
+                self.agent._run_graph(extra_emitters=[self._broadcast], run_id=self.run_id, emit_to_terminal=False)
 
             threading.Thread(target=_run_agent, daemon=True).start()
 
@@ -172,6 +176,27 @@ def run_web(agent_cls, args, *, host: str = "127.0.0.1", port: int = 8000):
             self.sessions: OrderedDict[str, Session] = OrderedDict()
             self.max_loaded = max(1, max_graphs)
             self.lock = threading.Lock()
+
+        def _is_valid_meta(self, meta: dict) -> bool:
+            if type(meta) is not dict:
+                return False
+            schema: dict[str, tuple[type, ...]] = {
+                "config": (dict,),
+                "created_at": (str,),
+                "created_at_ts": (int,),
+                "ever_activated": (bool,),
+                "last_clicked_at": (int,),
+                "last_interrupted_at": (int,),
+                "last_resumed_at": (int,),
+                "last_used_at": (int,),
+                "last_user_send_ms": (int,),
+                "run_id": (str,),
+                "title": (str, type(None)),
+            }
+            for k, types in schema.items():
+                if not isinstance(meta.get(k), types):
+                    return False
+            return bool(str(meta["run_id"]).strip())
 
         def _read_meta(self, run_dir: str) -> dict | None:
             path = os.path.join(run_dir, "metadata.json")
@@ -198,13 +223,9 @@ def run_web(agent_cls, args, *, host: str = "127.0.0.1", port: int = 8000):
                 return
             t = time()
             meta["last_user_send_ms"] = int(t * 1000)
-            def _first_n_chars(text: str, n: int) -> str:
-                return "".join(list(text)[:n]).strip()
-
-            if not meta["title"]:
-                base = _first_n_chars(user_text, 5)
-                if base:
-                    meta["title"] = base
+            base = "".join(ch for ch in str(user_text) if not ch.isspace())[:10]
+            if base:
+                meta["title"] = base
             self._write_meta(run_dir, meta)
 
         def mark_clicked(self, run_dir: str) -> None:
@@ -279,8 +300,9 @@ def run_web(agent_cls, args, *, host: str = "127.0.0.1", port: int = 8000):
                 if s.subscribers:
                     continue
                 self.sessions.pop(rid, None)
+                logging.info(f"[LRU] evict run_id={rid} reason=lru subscribers=0")
                 self.mark_interrupted(s.run_dir)
-                s.close()
+                s._close(reason="lru")
             if len(self.sessions) <= self.max_loaded:
                 return
             for rid, s in list(self.sessions.items()):
@@ -289,8 +311,9 @@ def run_web(agent_cls, args, *, host: str = "127.0.0.1", port: int = 8000):
                 if keep_run_id is not None and rid == keep_run_id:
                     continue
                 self.sessions.pop(rid, None)
+                logging.info(f"[LRU] evict run_id={rid} reason=lru_forced subscribers={len(s.subscribers)}")
                 self.mark_interrupted(s.run_dir)
-                s.close()
+                s._close(reason="lru_forced")
 
         def activate(self, s: Session):
             with self.lock:
@@ -299,12 +322,13 @@ def run_web(agent_cls, args, *, host: str = "127.0.0.1", port: int = 8000):
                 self._evict_if_needed(keep_run_id=s.run_id)
             self.mark_clicked(s.run_dir)
             if not s.halted:
-                s.ensure_runner_started()
+                s._ensure_runner_started()
 
         def list_sessions(self) -> list[dict]:
             items: list[dict] = []
             with self.lock:
                 active_ids = set(self.sessions.keys())
+                active_map = dict(self.sessions)
             try:
                 names = os.listdir(base_output_dir)
             except Exception:
@@ -313,25 +337,40 @@ def run_web(agent_cls, args, *, host: str = "127.0.0.1", port: int = 8000):
                 run_dir = os.path.join(base_output_dir, name)
                 if not os.path.isdir(run_dir):
                     continue
-                meta = self._read_meta(run_dir)
-                if not meta:
+                try:
+                    meta = self._read_meta(run_dir)
+                    if not meta or not self._is_valid_meta(meta):
+                        continue
+                    rid = meta["run_id"]
+                    title = meta["title"]
+                    created_at = meta["created_at"]
+                    last_user_send_ms = meta["last_user_send_ms"]
+                    created_at_ts = meta["created_at_ts"]
+                    state = "active" if rid in active_ids else "default"
+                    s = active_map.get(rid)
+                    if s is None:
+                        load_state = "unloaded"
+                    elif s._closed.is_set():
+                        load_state = "closed"
+                    elif not s._build_started or not s._ready.is_set():
+                        load_state = "building"
+                    elif s.build_error is not None:
+                        load_state = "error"
+                    else:
+                        load_state = "ready"
+                    items.append(
+                        {
+                            "run_id": rid,
+                            "title": title,
+                            "created_at": created_at,
+                            "last_user_send_ms": last_user_send_ms,
+                            "created_at_ts": created_at_ts,
+                            "state": state,
+                            "load_state": load_state,
+                        }
+                    )
+                except Exception:
                     continue
-                rid = meta["run_id"]
-                title = meta["title"]
-                created_at = meta["created_at"]
-                last_user_send_ms = meta["last_user_send_ms"]
-                created_at_ts = meta["created_at_ts"]
-                state = "active" if rid in active_ids else "default"
-                items.append(
-                    {
-                        "run_id": rid,
-                        "title": title,
-                        "created_at": created_at,
-                        "last_user_send_ms": last_user_send_ms,
-                        "created_at_ts": created_at_ts,
-                        "state": state,
-                    }
-                )
             items.sort(key=lambda x: (x["last_user_send_ms"], x["created_at_ts"]), reverse=True)
             return items
 
@@ -371,13 +410,12 @@ def run_web(agent_cls, args, *, host: str = "127.0.0.1", port: int = 8000):
             )
 
         def _args_for_load(self, meta: dict, run_dir: str):
-            cfg = meta["config"]
             return SimpleNamespace(
-                api_type=cfg.get("api_type", template_api_type),
+                api_type=template_api_type,
                 load_path=run_dir,
-                memory_dir=cfg.get("memory_dir", memory_dir),
-                model=cfg.get("model", template_model),
-                no_stream=not cfg.get("stream", not template_no_stream),
+                memory_dir=memory_dir,
+                model=template_model,
+                no_stream=template_no_stream,
                 output_path=base_output_dir,
                 save_name="",
                 web=False,
@@ -405,8 +443,9 @@ def run_web(agent_cls, args, *, host: str = "127.0.0.1", port: int = 8000):
                 template_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "memory_template"))
                 shutil.copytree(template_dir, memory_dir)
 
-            memory_backup_dir = os.path.join(run_dir, "memory_backup")
-            shutil.copytree(memory_dir, memory_backup_dir)
+            if memory_backup:
+                memory_backup_dir = os.path.join(run_dir, "memory_backup")
+                shutil.copytree(memory_dir, memory_backup_dir)
 
             run_id = uuid.uuid4().hex
             now_ts = int(time() * 1000)
@@ -421,21 +460,22 @@ def run_web(agent_cls, args, *, host: str = "127.0.0.1", port: int = 8000):
                 "last_resumed_at": 0,
                 "last_interrupted_at": 0,
                 "run_id": run_id,
-                "title": "",
+                "title": None,
             }
             self._write_meta(run_dir, meta)
             open(os.path.join(messages_dir, "messages.jsonl"), "a", encoding="utf-8").close()
-            history: list[dict] = []
-            s = Session(run_id=run_id, run_dir=run_dir, meta_config=meta["config"], history=history, halted=False)
-            s.ensure_build_started(lambda: self._args_for_load(meta, run_dir))
+            s = Session(run_id=run_id, run_dir=run_dir, halted=False)
+            s._ensure_build_started(lambda: self._args_for_load(meta, run_dir))
             self.activate(s)
             return s
 
-        def get_or_load(self, run_id: str) -> Session:
+        def get_or_load(self, run_id: str, *, activate: bool = True) -> Session:
             with self.lock:
                 s = self.sessions.get(run_id)
             if s is not None:
-                self.activate(s)
+                logging.info(f"[Session] hit run_id={run_id} activate={activate}")
+                if activate:
+                    self.activate(s)
                 return s
             run_dir = self._find_run_dir(run_id)
             if run_dir is None:
@@ -444,31 +484,38 @@ def run_web(agent_cls, args, *, host: str = "127.0.0.1", port: int = 8000):
             if not meta:
                 raise RuntimeError("Missing metadata.json")
             rid = meta["run_id"]
-            cfg = meta["config"]
             halted = meta["last_interrupted_at"] > meta["last_resumed_at"]
-            history = self._load_history(run_dir)
-            s = Session(run_id=rid, run_dir=run_dir, meta_config=cfg, history=history, halted=halted)
-            s.ensure_build_started(lambda: self._args_for_load(meta, run_dir))
-            self.activate(s)
+            logging.info(f"[Session] miss run_id={run_id} load_dir={os.path.basename(run_dir)} halted={halted} activate={activate}")
+            s = Session(run_id=rid, run_dir=run_dir, halted=halted)
+            s._ensure_build_started(lambda: self._args_for_load(meta, run_dir))
+            if activate:
+                self.activate(s)
             return s
 
     manager = SessionManager()
+    if not manager.list_sessions():
+        try:
+            manager.create_new_session()
+        except Exception:
+            pass
 
     app = Bottle()
 
     @app.get("/")
     def index():
-        response.set_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
-        response.set_header("Pragma", "no-cache")
-        response.set_header("Expires", "0")
-        return static_file("index.html", root=static_root)
+        res = static_file("index.html", root=static_root)
+        res.set_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+        res.set_header("Pragma", "no-cache")
+        res.set_header("Expires", "0")
+        return res
 
     @app.get("/static/<path:path>")
     def static_assets(path: str):
-        response.set_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
-        response.set_header("Pragma", "no-cache")
-        response.set_header("Expires", "0")
-        return static_file(path, root=static_root)
+        res = static_file(path, root=static_root)
+        res.set_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+        res.set_header("Pragma", "no-cache")
+        res.set_header("Expires", "0")
+        return res
 
     @app.get("/events")
     def events():
@@ -478,38 +525,19 @@ def run_web(agent_cls, args, *, host: str = "127.0.0.1", port: int = 8000):
                 response.status = 400
                 response.content_type = "application/json; charset=utf-8"
                 return json.dumps({"status": "error", "error": "missing run_id"}, ensure_ascii=False)
-            session = manager.get_or_load(str(rid))
+            session = manager.get_or_load(str(rid), activate=False)
             response.content_type = "text/event-stream"
             response.set_header("Cache-Control", "no-cache")
 
             q: queue.Queue[str] = queue.Queue()
             session.subscribers.add(q)
+            manager.activate(session)
 
             def gen():
                 try:
                     yield b"retry: 1000\n\n"
 
-                    cfg = session.meta_config
                     history = manager._load_history(session.run_dir)
-                    start_payload = json.dumps(
-                        {
-                            "run_id": session.run_id,
-                            "type": "run_start",
-                            "data": {
-                                "has_history": bool(history),
-                                "thinking_token": cfg.get("thinking_token", "think"),
-                                "model": cfg.get("model", ""),
-                                "initialized": True,
-                            },
-                        },
-                        ensure_ascii=False,
-                    )
-                    yield (f"data: {start_payload}\n\n").encode("utf-8")
-                    if not history and show_system_prompt:
-                        if session.wait_ready(timeout=30.0) and session.agent and session.agent.system_message:
-                            history = [
-                                {"type": "system", "data": {"content": session.agent.system_message.content}},
-                            ]
                     if history:
                         history_payload = json.dumps(
                             {
@@ -520,8 +548,51 @@ def run_web(agent_cls, args, *, host: str = "127.0.0.1", port: int = 8000):
                             ensure_ascii=False,
                         )
                         yield (f"data: {history_payload}\n\n").encode("utf-8")
+
+                    if not session._wait_ready(timeout=30.0):
+                        raise RuntimeError("session not ready")
+                    if session.build_error is not None:
+                        raise RuntimeError(f"session build failed: {type(session.build_error).__name__}")
+                    if session.agent is None or session.agent.config is None:
+                        raise RuntimeError("session agent config is missing")
+                    agent_cfg = session.agent.config
+                    start_payload = json.dumps(
+                        {
+                            "run_id": session.run_id,
+                            "type": "run_start",
+                            "data": {
+                                "has_history": bool(history),
+                                "thinking_token": agent_cfg.thinking_token,
+                                "model": agent_cfg.model,
+                                "initialized": True,
+                            },
+                        },
+                        ensure_ascii=False,
+                    )
+                    yield (f"data: {start_payload}\n\n").encode("utf-8")
+                    if not history and show_system_prompt:
+                        if session.agent and session.agent.system_message:
+                            history = [
+                                {"type": "system", "data": {"content": session.agent.system_message.content}},
+                            ]
+                            history_payload = json.dumps(
+                                {
+                                    "run_id": session.run_id,
+                                    "type": "messages",
+                                    "data": {"message_type": "main", "messages": history, "metadata": {"history": True}},
+                                },
+                                ensure_ascii=False,
+                            )
+                            yield (f"data: {history_payload}\n\n").encode("utf-8")
                     while True:
                         payload = q.get()
+                        try:
+                            parsed = json.loads(payload)
+                            if isinstance(parsed, dict) and parsed.get("type") == "session_closed":
+                                yield (f"data: {payload}\n\n").encode("utf-8")
+                                return
+                        except Exception:
+                            pass
                         yield (f"data: {payload}\n\n").encode("utf-8")
                 finally:
                     session.subscribers.discard(q)
@@ -563,6 +634,31 @@ def run_web(agent_cls, args, *, host: str = "127.0.0.1", port: int = 8000):
         manager.set_title(str(rid), str(title))
         return {"status": "success"}
 
+    @app.post("/api/sessions/delete")
+    def api_sessions_delete():
+        data = request.json or {}
+        rid = data.get("run_id")
+        if not rid:
+            response.status = 400
+            return {"status": "error", "error": "missing run_id"}
+        run_dir = manager._find_run_dir(str(rid))
+        if run_dir is None:
+            response.status = 404
+            return {"status": "error", "error": "unknown run_id"}
+        try:
+            with manager.lock:
+                s = manager.sessions.pop(str(rid), None)
+            if s is not None:
+                try:
+                    s._close(reason="deleted")
+                except Exception:
+                    pass
+            shutil.rmtree(run_dir, ignore_errors=False)
+            return {"status": "success"}
+        except Exception:
+            response.status = 500
+            return {"status": "error", "error": traceback.format_exc()}
+
     @app.post("/api/send")
     def api_send():
         data = request.json or {}
@@ -572,7 +668,7 @@ def run_web(agent_cls, args, *, host: str = "127.0.0.1", port: int = 8000):
             response.status = 400
             return {"status": "error", "error": "missing run_id"}
         session = manager.get_or_load(str(rid))
-        if not session.wait_ready(timeout=30.0):
+        if not session._wait_ready(timeout=30.0):
             response.status = 500
             return {"status": "error", "error": "session not ready"}
         if session.build_error is not None:
@@ -580,7 +676,7 @@ def run_web(agent_cls, args, *, host: str = "127.0.0.1", port: int = 8000):
             return {"status": "error", "error": f"session build failed: {type(session.build_error).__name__}"}
         manager.mark_resumed(session.run_dir)
         session.halted = False
-        session.ensure_runner_started()
+        session._ensure_runner_started()
         BaseNode.clear_interrupt(session.run_id)
         user_text = "" if text is None else str(text)
         session.input_queue.put(user_text)
@@ -595,6 +691,11 @@ def run_web(agent_cls, args, *, host: str = "127.0.0.1", port: int = 8000):
             response.status = 400
             return {"status": "error", "error": "missing run_id"}
         session = manager.get_or_load(str(rid))
+        try:
+            manager.mark_interrupted(session.run_dir)
+        except Exception:
+            pass
+        session.halted = True
         BaseNode.request_interrupt(session.run_id)
         return {"status": "success"}
 
@@ -614,7 +715,9 @@ def run_web(agent_cls, args, *, host: str = "127.0.0.1", port: int = 8000):
         if q is None:
             return {"status": "error", "error": "unknown id"}
         BaseNode.clear_interrupt(session.run_id)
-        q.put("" if text is None else str(text))
+        user_text = "" if text is None else str(text)
+        q.put(user_text)
+        manager.mark_user_send(session.run_dir, user_text)
         return {"status": "success"}
 
     run(app=app, host=host, port=port, server=ThreadingWSGIRefServer, quiet=True)

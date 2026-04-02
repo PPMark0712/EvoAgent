@@ -33,7 +33,7 @@ class AgentConfig(BaseModel):
     model_max_retries: int = 10
     model_retry_delay: float = 5.0
     stream: bool = True
-    thinking_token: str = "think"
+    thinking_token: str = "thinking"
     tool_call_sleep_time: float = 1.0
     tool_call_timeout: float = 60.0
     tool_result_max_chars: int = 20000

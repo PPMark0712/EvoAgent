@@ -35,6 +35,36 @@ body {
   gap: 12px;
 }
 
+.shell-top {
+  display: grid;
+  grid-template-columns: 300px 1fr;
+  gap: 12px;
+}
+
+.shell-left {
+  height: 38px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12px;
+  gap: 10px;
+}
+
+.shell-right {
+  height: 38px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  display: grid;
+  place-items: center;
+  padding: 0 12px;
+}
+
 .body {
   min-height: 0;
   display: grid;
@@ -60,22 +90,53 @@ body {
   overflow: hidden;
 }
 
-.sidebar-header {
-  padding: 12px;
-  border-bottom: 1px solid var(--border);
-  display: flex;
-  gap: 10px;
-  align-items: center;
-}
-
 .sessions {
   overflow: auto;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(88, 110, 117, 0.35) transparent;
   padding: 10px;
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 
+.sessions::-webkit-scrollbar {
+  width: 8px;
+}
+
+.sessions::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.sessions::-webkit-scrollbar-thumb {
+  background: rgba(88, 110, 117, 0.28);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+.sessions::-webkit-scrollbar-thumb:hover {
+  background: rgba(88, 110, 117, 0.45);
+  background-clip: padding-box;
+}
+
+.sessions-top {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 0 10px;
+}
+
+.sessions-top .btn {
+  width: 190px;
+  display: inline-flex;
+  justify-content: center;
+}
+
+.sessions-top .btn-primary {
+  box-shadow: none;
+}
 .session-empty {
   padding: 12px 10px;
   border-radius: 12px;
@@ -87,6 +148,7 @@ body {
 
 .session-item {
   cursor: pointer;
+  position: relative;
   border-radius: 12px;
   border: 1px solid var(--border);
   background: var(--panel-2);
@@ -110,6 +172,17 @@ body {
   animation: greenBlink 0.4s ease-in-out infinite;
 }
 
+.session-item.state-loading {
+  border-width: 2px;
+  border-style: dashed;
+  border-color: rgba(34, 197, 94, 0.60);
+  box-shadow: none;
+}
+
+.session-item.state-loading::after {
+  content: none;
+}
+
 .session-item.active {
   background: rgba(38, 139, 210, 0.10);
 }
@@ -123,6 +196,21 @@ body {
   text-overflow: ellipsis;
   grid-column: 1;
   grid-row: 1;
+}
+
+.session-title-input {
+  width: 100%;
+  border: 1px solid rgba(88, 110, 117, 0.28);
+  background: rgba(253, 246, 227, 0.82);
+  border-radius: 10px;
+  padding: 4px 8px;
+  font: inherit;
+  color: var(--text);
+  outline: none;
+}
+
+.session-title-input:focus {
+  box-shadow: var(--ring);
 }
 
 .session-sub {
@@ -141,6 +229,54 @@ body {
   align-items: center;
   justify-content: flex-end;
 }
+
+.session-delete {
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(253, 246, 227, 0.65);
+  color: var(--muted);
+  display: inline-grid;
+  place-items: center;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.session-item:hover .session-delete {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.session-delete:hover { color: var(--text); border-color: rgba(88, 110, 117, 0.28); }
+
+.session-delete-popover {
+  position: fixed;
+  z-index: 3000;
+  border: 1px solid var(--border);
+  background: rgba(253, 246, 227, 0.95);
+  box-shadow: var(--shadow);
+  border-radius: 12px;
+  padding: 10px 10px;
+  font-size: 12px;
+  color: var(--text);
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.session-delete-popover .session-delete-yes,
+.session-delete-popover .session-delete-no {
+  border: 1px solid var(--border);
+  background: rgba(253, 246, 227, 0.65);
+  border-radius: 10px;
+  padding: 4px 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.session-delete-popover .session-delete-yes:hover,
+.session-delete-popover .session-delete-no:hover { color: var(--text); border-color: rgba(88, 110, 117, 0.28); }
 
 .session-btn {
   border: 1px solid var(--border);
@@ -196,6 +332,19 @@ body {
   overflow: hidden;
 }
 
+.chat-titlebar {
+  width: 100%;
+  text-align: center;
+  font-size: 12px;
+  color: var(--muted);
+  user-select: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chat-titlebar.hidden { display: none; }
+
 .loading {
   position: absolute;
   inset: 0;
@@ -216,6 +365,37 @@ body {
   border: 3px solid rgba(88, 110, 117, 0.18);
   border-top-color: rgba(38, 139, 210, 0.65);
   animation: spin 0.8s linear infinite;
+}
+
+#backendDownOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: grid;
+  place-items: center;
+  background: rgba(7, 54, 66, 0.25);
+  backdrop-filter: blur(2px);
+}
+
+.backend-down-box {
+  width: min(420px, calc(100vw - 48px));
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: rgba(253, 246, 227, 0.92);
+  box-shadow: var(--shadow);
+  padding: 14px 16px;
+  text-align: center;
+}
+
+.backend-down-title {
+  font-weight: 700;
+  font-size: 14px;
+  margin-bottom: 6px;
+}
+
+.backend-down-sub {
+  font-size: 13px;
+  color: var(--muted);
 }
 
 .loading-text { font-size: 13px; color: var(--muted); }
@@ -444,6 +624,42 @@ body {
 }
 .input:focus { box-shadow: var(--ring); border-color: rgba(99, 102, 241, 0.40); }
 .input:focus { border-color: rgba(38, 139, 210, 0.35); }
+.input {
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+
+.input:hover,
+.input:focus {
+  scrollbar-color: rgba(88, 110, 117, 0.35) transparent;
+}
+
+.input::-webkit-scrollbar {
+  width: 8px;
+}
+
+.input::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.input::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+.input:hover::-webkit-scrollbar-thumb,
+.input:focus::-webkit-scrollbar-thumb {
+  background: rgba(88, 110, 117, 0.28);
+  background-clip: padding-box;
+}
+
+.input::-webkit-scrollbar-thumb:hover {
+  background: rgba(88, 110, 117, 0.45);
+  background-clip: padding-box;
+}
 
 .hint { margin-top: 8px; font-size: 12px; color: var(--muted); }
 

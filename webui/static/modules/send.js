@@ -3,6 +3,7 @@ import { state } from "./state.js";
 import { postJson } from "./api.js";
 import { appendMessage } from "./render.js";
 import { finalizeStreamingToParsed } from "./stream.js";
+import { refreshSessions } from "./sessions.js";
 import { autosize, setSendMode, setAskPending } from "./ui.js";
 
 export async function send() {
@@ -16,6 +17,7 @@ export async function send() {
     setAskPending(null, "");
     appendMessage("user", text);
     await postJson("/api/ask_user_reply", { run_id: state.activeRunId, id, text });
+    refreshSessions().catch(() => {});
     return;
   }
 
@@ -36,6 +38,7 @@ export async function send() {
   state.inFlight = true;
   setSendMode("stop");
   await postJson("/api/send", { run_id: state.activeRunId, text });
+  refreshSessions().catch(() => {});
 }
 
 export function initSendHandlers() {

@@ -35,13 +35,17 @@ ANTHROPIC_API_KEY=sk-ant-xxxx
 ```bash
 python main.py --model {MODEL} --api_type {openai|anthropic} --web --port 1234
 ```
-启动后访问 `http://localhost:1234`，在弹窗中配置模型即可开始对话。
+启动后访问 `http://localhost:1234`，默认会自动进入最近的会话；若 `output_path` 下没有任何合法会话记录，会自动创建一个空会话。
+
+常用可选参数：
+- `--show_system_prompt`：在对话历史中展示 system prompt（默认不展示）
+- `--max_graphs`：Web 模式最多同时保活的 graph 数量（LRU，默认 5）
 
 #### 浏览器驱动（必做一次）
 `web_scan` / `web_execute_js` 依赖浏览器侧的 Tampermonkey UserScript，需要先把仓库里的脚本安装到“篡改猴”插件：
 - 打开浏览器扩展商店安装 Tampermonkey（篡改猴）
 - 在 Tampermonkey 中创建新脚本，将仓库文件内容粘贴进去并保存：
-  - [evoagent_driver.user.js](./agent/nodes/executor/tools/evoagent_driver.user.js)
+  - [agent/nodes/executor/tools/evo_driver.user.js](./agent/nodes/executor/tools/evoagent_driver.user.js)
 - 打开任意网页，右下角出现连接状态角标（已连接/未连接）即表示脚本生效
 - 可以在部分网页禁用该脚本，如包含重要信息的页面、EvoAgent的localhost页面等，避免重要信息被篡改。
 - 建议在默认浏览器中使用，这样EvoAgent使用命令启动浏览器界面时也可以正常工作。
@@ -57,6 +61,7 @@ python main.py --model {MODEL} --api_type {openai|anthropic} --loop_provider /pa
 ```
 - `--loop_provider`: 指定一个 Python 文件的绝对路径，文件内需提供 `provider() -> str`。
 - `--loop_interval`: 限制两次任务触发的**最小时间间隔**（秒）。
+> 注意：`--web` 与 `--loop_provider` 同时指定时，会忽略 loop 模式并打印 warning。
 
 ## 🛠️ 工具箱
 
@@ -77,9 +82,13 @@ python main.py --model {MODEL} --api_type {openai|anthropic} --loop_provider /pa
 
 - `--model`：指定使用的模型
 - `--web`：启动 Web 界面
+- `--host` / `--port`：Web 服务监听地址与端口
+- `--max_graphs`：Web 模式最多同时保活的 graph 数量（LRU）
 - `--loop_provider`：指定循环输入 provider（提供则启用循环输入模式）
+- `--loop_interval`：循环输入的最小触发间隔（秒）
 - `--output_path`：指定日志与工作目录存放位置
+- `--show_system_prompt`：在输出中展示 system prompt
 
 ## 🙏 致谢
 
-本项目中 Web 相关工具（包括 `web_scan`、`web_execute_js` 及相关 HTML 简化逻辑）参考了 [GenericAgent](https://github.com/lsdefine/GenericAgent) 提供的核心代码。
+本项目中 Web 相关工具（包括 `web_scan`、`web_execute_js`）参考了 [GenericAgent](https://github.com/lsdefine/GenericAgent)。

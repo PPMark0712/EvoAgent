@@ -13,6 +13,7 @@ def get_argparser(parser: argparse.ArgumentParser | None = None) -> argparse.Arg
 
     # I/O and persistence
     parser.add_argument("--load_path", type=str, default="", help="Existing run output directory to load history from (absolute or project-relative).")
+    parser.add_argument("--memory_backup", action="store_true", help="Backup memory_dir into run output directory (memory_backup).")
     parser.add_argument("--memory_dir", type=str, default="memory", help="Memory directory (absolute or project-relative).")
     parser.add_argument("--output_path", type=str, default="output", help="Path to store output files and logs")
     parser.add_argument("--save_name", type=str, default="", help="Save name for output directory prefix.")

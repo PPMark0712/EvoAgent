@@ -12,8 +12,6 @@ class UserNode(BaseNode):
     def run(self, state: AgentState):
         user_input = self.get_user_input("User input: ")
         BaseNode.clear_interrupt()
-        if state["interrupted"]:
-            user_input = "(User Interrupted)\n" + user_input
         message = HumanMessage(content=user_input, additional_kwargs={"source": "user"})
         self.emit_messages([message], "main")
         state_update = {
