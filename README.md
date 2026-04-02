@@ -6,6 +6,8 @@
 
 ### 1. 环境配置
 
+要求 Python 版本：3.12
+
 ```bash
 # 创建 conda 环境
 conda create -n evo_agent python=3.12 -y
