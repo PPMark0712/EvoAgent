@@ -35,11 +35,12 @@ ANTHROPIC_API_KEY=sk-ant-xxxx
 ```bash
 python main.py --model {MODEL} --api_type {openai|anthropic} --web --port 1234
 ```
-启动后访问 `http://localhost:1234`，默认会自动进入最近的会话；若 `output_path` 下没有任何合法会话记录，会自动创建一个空会话。
+启动后访问 `http://localhost:1234`。
 
 常用可选参数：
 - `--show_system_prompt`：在对话历史中展示 system prompt（默认不展示）
 - `--max_graphs`：Web 模式最多同时保活的 graph 数量（LRU，默认 5）
+- `--memory_backup`：新建会话时将 `--memory_dir` 备份到该会话目录下（默认不备份）
 
 #### 浏览器驱动（必做一次）
 `web_scan` / `web_execute_js` 依赖浏览器侧的 Tampermonkey UserScript，需要先把仓库里的脚本安装到“篡改猴”插件：
@@ -80,14 +81,18 @@ python main.py --model {MODEL} --api_type {openai|anthropic} --loop_provider /pa
 
 ## 常用参数
 
-- `--model`：指定使用的模型
-- `--web`：启动 Web 界面
-- `--host` / `--port`：Web 服务监听地址与端口
+- `--host`：Web 服务监听地址
 - `--max_graphs`：Web 模式最多同时保活的 graph 数量（LRU）
-- `--loop_provider`：指定循环输入 provider（提供则启用循环输入模式）
+- `--memory_backup`：新建会话时备份 `--memory_dir` 到会话目录下（默认不备份）
+- `--memory_dir`：记忆目录（绝对路径或相对项目路径，默认 `memory`）
+- `--model`：指定使用的模型
+- `--no_stream`：禁用流式输出
 - `--loop_interval`：循环输入的最小触发间隔（秒）
-- `--output_path`：指定日志与工作目录存放位置
+- `--loop_provider`：指定循环输入 provider（提供则启用循环输入模式）
+- `--output_path`：会话输出根目录，默认 `output`，不得有自动保存的会话记录以外的内容
+- `--port`：Web 服务监听端口，默认 1234
 - `--show_system_prompt`：在输出中展示 system prompt
+- `--web`：启动 Web 界面
 
 ## 🙏 致谢
 

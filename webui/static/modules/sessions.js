@@ -9,6 +9,20 @@ let deletePopoverEl = null;
 let deletePopoverTimer = 0;
 let loadingPollTimer = 0;
 let loadingPollInFlight = false;
+let suppressBackendDownUntil = 0;
+
+function _closeEventsSilently() {
+  try {
+    if (!state.es) return;
+    suppressBackendDownUntil = Date.now() + 1500;
+    state.es.onopen = null;
+    state.es.onerror = null;
+    state.es.onmessage = null;
+    state.es.close();
+  } catch {
+  }
+  state.es = null;
+}
 
 function _stopLoadingPoll() {
   if (loadingPollTimer) {
@@ -191,7 +205,11 @@ export function renderSessions(list) {
     const loadState = String(s.load_state || "").trim();
     const isBuilding = loadState === "building";
     if (isBuilding) anyBuilding = true;
-    if (state.loadingRunIds instanceof Set && state.loadingRunIds.has(runId) && !isBuilding && runId !== state.activeRunId) {
+    if (
+      state.loadingRunIds instanceof Set &&
+      state.loadingRunIds.has(runId) &&
+      (loadState === "ready" || loadState === "error" || loadState === "closed")
+    ) {
       state.loadingRunIds.delete(runId);
     }
     if (stateLabel === "active") currentActiveIds.add(runId);
@@ -290,9 +308,13 @@ export function renderSessions(list) {
       e.preventDefault();
       e.stopPropagation();
       _openDeletePopover(deleteBtn, async () => {
+        const deletingActive = runId === state.activeRunId;
+        if (deletingActive) {
+          _closeEventsSilently();
+        }
         await postJson("/api/sessions/delete", { run_id: runId });
         await refreshSessions();
-        if (runId === state.activeRunId) {
+        if (deletingActive) {
           const first = state.sessionsCache.length ? String(state.sessionsCache[0].run_id || "").trim() : "";
           if (first) switchSession(first);
           else {
@@ -329,6 +351,7 @@ export function renderSessions(list) {
   state.prevActiveIds = currentActiveIds;
   state.activeFadeUntil = fadeMap;
   state.activeFadeTimers = fadeTimers;
+  setSendMode(state.inFlight && !state.askPendingId ? "stop" : "send");
 }
 
 export function resetConversationUI() {
@@ -347,12 +370,15 @@ export function resetConversationUI() {
 
 export function connectEvents(runId) {
   if (state.backendDown) return;
-  if (state.es) state.es.close();
+  _closeEventsSilently();
   setLoading(true);
   setStatus("连接中…");
   state.es = new EventSource(`/events?run_id=${encodeURIComponent(runId)}`);
   state.es.onopen = () => setStatus("已连接", "ok");
-  state.es.onerror = () => setBackendDown();
+  state.es.onerror = () => {
+    if (Date.now() < suppressBackendDownUntil) return;
+    setBackendDown();
+  };
   state.es.onmessage = onEventMessage;
 }
 

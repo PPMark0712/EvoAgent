@@ -300,7 +300,6 @@ def run_web(agent_cls, args, *, host: str = "127.0.0.1", port: int = 8000):
                 if s.subscribers:
                     continue
                 self.sessions.pop(rid, None)
-                logging.info(f"[LRU] evict run_id={rid} reason=lru subscribers=0")
                 self.mark_interrupted(s.run_dir)
                 s._close(reason="lru")
             if len(self.sessions) <= self.max_loaded:
@@ -311,7 +310,6 @@ def run_web(agent_cls, args, *, host: str = "127.0.0.1", port: int = 8000):
                 if keep_run_id is not None and rid == keep_run_id:
                     continue
                 self.sessions.pop(rid, None)
-                logging.info(f"[LRU] evict run_id={rid} reason=lru_forced subscribers={len(s.subscribers)}")
                 self.mark_interrupted(s.run_dir)
                 s._close(reason="lru_forced")
 
@@ -473,7 +471,6 @@ def run_web(agent_cls, args, *, host: str = "127.0.0.1", port: int = 8000):
             with self.lock:
                 s = self.sessions.get(run_id)
             if s is not None:
-                logging.info(f"[Session] hit run_id={run_id} activate={activate}")
                 if activate:
                     self.activate(s)
                 return s
@@ -485,7 +482,6 @@ def run_web(agent_cls, args, *, host: str = "127.0.0.1", port: int = 8000):
                 raise RuntimeError("Missing metadata.json")
             rid = meta["run_id"]
             halted = meta["last_interrupted_at"] > meta["last_resumed_at"]
-            logging.info(f"[Session] miss run_id={run_id} load_dir={os.path.basename(run_dir)} halted={halted} activate={activate}")
             s = Session(run_id=rid, run_dir=run_dir, halted=halted)
             s._ensure_build_started(lambda: self._args_for_load(meta, run_dir))
             if activate:
@@ -493,11 +489,6 @@ def run_web(agent_cls, args, *, host: str = "127.0.0.1", port: int = 8000):
             return s
 
     manager = SessionManager()
-    if not manager.list_sessions():
-        try:
-            manager.create_new_session()
-        except Exception:
-            pass
 
     app = Bottle()
 

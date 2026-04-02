@@ -8,6 +8,7 @@ import { autosize, setSendMode, setAskPending } from "./ui.js";
 
 export async function send() {
   if (!state.activeRunId) return;
+  if (sendBtn.disabled) return;
   if (state.askPendingId) {
     const text = inputEl.value || "";
     if (!text.trim()) return;
@@ -45,8 +46,12 @@ export function initSendHandlers() {
   sendBtn.addEventListener("click", send);
   inputEl.addEventListener("keydown", (e) => {
     if (e.key !== "Enter") return;
-    if (e.shiftKey) return;
     if (state.inputComposing || e.isComposing || e.key === "Process") return;
+    if (sendBtn.disabled) {
+      e.preventDefault();
+      return;
+    }
+    if (e.shiftKey) return;
     e.preventDefault();
     if (state.inFlight && !state.askPendingId) return;
     send();

@@ -60,6 +60,7 @@ export function setSendMode(mode) {
   if (!state.activeRunId) {
     sendBtn.textContent = "发送";
     sendBtn.classList.remove("btn-danger");
+    sendBtn.classList.remove("btn-loading");
     sendBtn.classList.add("btn-primary");
     sendBtn.disabled = true;
     return;
@@ -77,6 +78,7 @@ export function setSendMode(mode) {
   if (state.loadingRunIds instanceof Set && state.loadingRunIds.has(state.activeRunId)) {
     sendBtn.textContent = "加载中";
     sendBtn.classList.remove("btn-danger");
+    sendBtn.classList.add("btn-loading");
     sendBtn.classList.add("btn-primary");
     sendBtn.disabled = true;
     return;
@@ -84,6 +86,15 @@ export function setSendMode(mode) {
   if (activeLoadState === "building") {
     sendBtn.textContent = "加载中";
     sendBtn.classList.remove("btn-danger");
+    sendBtn.classList.add("btn-loading");
+    sendBtn.classList.add("btn-primary");
+    sendBtn.disabled = true;
+    return;
+  }
+  if (activeLoadState === "unloaded") {
+    sendBtn.textContent = "加载中";
+    sendBtn.classList.remove("btn-danger");
+    sendBtn.classList.add("btn-loading");
     sendBtn.classList.add("btn-primary");
     sendBtn.disabled = true;
     return;
@@ -91,6 +102,7 @@ export function setSendMode(mode) {
   if (activeLoadState === "error" || activeLoadState === "closed") {
     sendBtn.textContent = "发送";
     sendBtn.classList.remove("btn-danger");
+    sendBtn.classList.remove("btn-loading");
     sendBtn.classList.add("btn-primary");
     sendBtn.disabled = true;
     return;
@@ -98,11 +110,13 @@ export function setSendMode(mode) {
   if (mode === "stop") {
     sendBtn.textContent = "停止";
     sendBtn.classList.remove("btn-primary");
+    sendBtn.classList.remove("btn-loading");
     sendBtn.classList.add("btn-danger");
     return;
   }
   sendBtn.textContent = "发送";
   sendBtn.classList.remove("btn-danger");
+  sendBtn.classList.remove("btn-loading");
   sendBtn.classList.add("btn-primary");
   sendBtn.disabled = false;
 }

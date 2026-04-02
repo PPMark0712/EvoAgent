@@ -683,6 +683,25 @@ body {
   color: rgba(255, 255, 255, 0.95);
   box-shadow: 0 14px 38px rgba(99, 102, 241, 0.35);
 }
+
+.btn-primary.btn-loading {
+  background: rgba(148, 163, 184, 0.22);
+  border-color: rgba(148, 163, 184, 0.35);
+  color: rgba(148, 163, 184, 0.95);
+  box-shadow: none;
+  filter: none;
+}
+
+.btn-primary.btn-loading:hover,
+.btn-primary.btn-loading:active {
+  filter: none;
+  transform: none;
+}
+
+.btn:disabled {
+  cursor: default;
+  opacity: 0.92;
+}
 .btn-danger {
   border-color: rgba(220, 50, 47, 0.35);
   background: linear-gradient(135deg, rgba(220, 50, 47, 0.95), rgba(203, 75, 22, 0.95));
