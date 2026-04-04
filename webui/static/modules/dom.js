@@ -1,5 +1,8 @@
 export const chatInnerEl = document.getElementById("chatInner");
 export const chatTitleEl = document.getElementById("chatTitle");
+export const chatTitleTextEl = document.getElementById("chatTitleText");
+export const chatTitleMetaEl = document.getElementById("chatTitleMeta");
+export const modelSelectEl = document.getElementById("modelSelect");
 export const sessionsEl = document.getElementById("sessions");
 export const loadingEl = document.getElementById("loading");
 export const inputEl = document.getElementById("input");

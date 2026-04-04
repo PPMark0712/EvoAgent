@@ -22,7 +22,8 @@ export async function send() {
     return;
   }
 
-  if (state.inFlight) {
+  const inflight = state.inFlight && String(state.inFlightRunId || "") === String(state.activeRunId || "");
+  if (inflight) {
     state.stopRequested = true;
     if (state.streamingMsgEl) {
       finalizeStreamingToParsed(state.streamingText);
@@ -37,6 +38,7 @@ export async function send() {
   autosize();
   appendMessage("user", text);
   state.inFlight = true;
+  state.inFlightRunId = String(state.activeRunId || "");
   setSendMode("stop");
   await postJson("/api/send", { run_id: state.activeRunId, text });
   refreshSessions().catch(() => {});

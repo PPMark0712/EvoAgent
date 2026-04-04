@@ -19,16 +19,42 @@ pip install -r requirements.txt
 
 ### 2. API 配置
 
-在项目根目录创建 `.env` 文件，配置模型 API 信息。你可以同时配置 OpenAI 和 Anthropic，框架会根据 `--api_type` 参数选择对应的 Provider：
+在项目根目录创建 `.env` 文件，配置模型预设（preset）路径与各 preset 对应的 API 变量。默认 preset 文件路径为 `agent/models/model_presets.json`（也可通过 `EVOAGENT_MODEL_PRESETS_PATH` 覆盖）。
+
+推荐做法：先复制示例配置，再按 preset 增加对应的 API 变量：
+```bash
+cp .env_example .env
+```
+
+以 Qwen 为例：在 `.env` 中新增一组变量，然后在 preset 中通过 `api_key_env` / `api_base_env` 引用即可：
 
 ```env
-# OpenAI 配置
-OPENAI_API_BASE=https://api.example.com/v1
-OPENAI_API_KEY=sk-xxxx
+QWEN_OPENAI_API_BASE="https://dashscope.aliyuncs.com/compatible-mode/v1"
+QWEN_OPENAI_API_KEY=sk-xxxx
+```
 
-# Anthropic 配置
-ANTHROPIC_API_BASE=https://api.anthropic.com
-ANTHROPIC_API_KEY=sk-ant-xxxx
+可选：配置模型预设列表（推荐用于 WebUI 切换模型）。在 `.env` 中指定：
+
+```env
+EVOAGENT_MODEL_PRESETS_PATH=agent/models/model_presets.json
+EVOAGENT_DEFAULT_MODEL=qwen3.5-flash
+```
+
+`model_presets.json` 结构示例（支持每个模型一套完整 config，包括 special_tokens、extra_body 等）：
+
+```json
+{
+  "default": {
+    "label": "Claude Sonnet",
+    "api_type": "anthropic",
+    "model": "claude-3-7-sonnet-latest",
+    "api_key_env": "ANTHROPIC_API_KEY_MAIN",
+    "api_base_env": "ANTHROPIC_API_BASE_MAIN",
+    "stream": true,
+    "special_tokens": { "thinking": "thinking", "toolcall": "toolcall" },
+    "model_kwargs": { "extra_body": { "enable_thinking": false } }
+  }
+}
 ```
 
 ### 3. 运行
@@ -48,7 +74,7 @@ python main.py --model {MODEL} --api_type {openai|anthropic} --web --port 1234
 `web_scan` / `web_execute_js` 依赖浏览器侧的 Tampermonkey UserScript，需要先把仓库里的脚本安装到“篡改猴”插件：
 - 打开浏览器扩展商店安装 Tampermonkey（篡改猴）
 - 在 Tampermonkey 中创建新脚本，将仓库文件内容粘贴进去并保存：
-  - [agent/nodes/executor/tools/evo_driver.user.js](./agent/nodes/executor/tools/evoagent_driver.user.js)
+  - [agent/nodes/executor/tools/evoagent_driver.user.js](./agent/nodes/executor/tools/evoagent_driver.user.js)
 - 打开任意网页，右下角出现连接状态角标（已连接/未连接）即表示脚本生效
 - 可以在部分网页禁用该脚本，如包含重要信息的页面、EvoAgent的localhost页面等，避免重要信息被篡改。
 - 建议在默认浏览器中使用，这样EvoAgent使用命令启动浏览器界面时也可以正常工作。
@@ -88,7 +114,6 @@ python main.py --model {MODEL} --api_type {openai|anthropic} --loop_provider /pa
 - `--memory_backup`：新建会话时备份 `--memory_dir` 到会话目录下（默认不备份）
 - `--memory_dir`：记忆目录（绝对路径或相对项目路径，默认 `memory`）
 - `--model`：指定使用的模型
-- `--no_stream`：禁用流式输出
 - `--loop_interval`：循环输入的最小触发间隔（秒）
 - `--loop_provider`：指定循环输入 provider（提供则启用循环输入模式）
 - `--output_path`：会话输出根目录，默认 `output`，不得有自动保存的会话记录以外的内容

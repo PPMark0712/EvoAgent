@@ -17,6 +17,7 @@ from wsgiref.simple_server import WSGIServer, make_server
 
 from agent.nodes.base import BaseNode
 from agent.nodes.executor.tools.runtime import ToolRuntime
+from agent.utils import DEFAULT_MODEL, MODEL_PRESETS
 
 
 class ThreadingWSGIServer(ThreadingMixIn, WSGIServer):
@@ -33,26 +34,28 @@ def run_web(agent_cls, args, *, host: str = "127.0.0.1", port: int = 8000):
     static_root = os.path.join(os.path.dirname(__file__), "static")
     display_host = "localhost" if host in {"0.0.0.0", "::", "127.0.0.1"} else host
     msg = f"WebUI listening on {host}:{port} | open http://{display_host}:{port}/"
-    root_logger = logging.getLogger()
-    if not root_logger.handlers:
-        logging.basicConfig(level=logging.INFO, format="%(message)s")
+    fmt = "%(asctime)s %(levelname)s %(name)s: %(message)s"
+    logging.basicConfig(level=logging.INFO, format=fmt, force=True)
     logging.info(msg)
 
     base_output_dir = os.path.abspath(args.output_path or "output")
     os.makedirs(base_output_dir, exist_ok=True)
     memory_dir = args.memory_dir if os.path.isabs(args.memory_dir) else os.path.abspath(args.memory_dir)
-    template_api_type = args.api_type
-    template_model = args.model
-    template_no_stream = args.no_stream
     show_system_prompt = args.show_system_prompt
     max_graphs = args.max_graphs
-    memory_backup = bool(getattr(args, "memory_backup", False))
+    memory_backup = bool(args.memory_backup)
+    model_presets: dict = MODEL_PRESETS
+    cli_default_model = str(args.model or "").strip()
+    default_model = cli_default_model or str(DEFAULT_MODEL).strip()
+    if not default_model:
+        raise ValueError("Missing model")
 
     class Session:
         def __init__(self, *, run_id: str, run_dir: str, halted: bool):
             self.run_id = run_id
             self.run_dir = run_dir
             self.halted = halted
+            self.model = default_model
             self.agent = None
             self.build_error = None
             self.input_queue: queue.Queue[str] = queue.Queue()
@@ -107,10 +110,6 @@ def run_web(agent_cls, args, *, host: str = "127.0.0.1", port: int = 8000):
             except Exception:
                 pass
             BaseNode.request_interrupt(self.run_id)
-            try:
-                self.input_queue.put_nowait("")
-            except Exception:
-                pass
 
         def _ensure_build_started(self, build_args_factory):
             with self._lock:
@@ -176,12 +175,15 @@ def run_web(agent_cls, args, *, host: str = "127.0.0.1", port: int = 8000):
             self.sessions: OrderedDict[str, Session] = OrderedDict()
             self.max_loaded = max(1, max_graphs)
             self.lock = threading.Lock()
+            self.current_model = default_model
+            self.run_models: dict[str, str] = {}
 
         def _is_valid_meta(self, meta: dict) -> bool:
             if type(meta) is not dict:
                 return False
             schema: dict[str, tuple[type, ...]] = {
                 "config": (dict,),
+                "model": (str,),
                 "created_at": (str,),
                 "created_at_ts": (int,),
                 "ever_activated": (bool,),
@@ -190,25 +192,43 @@ def run_web(agent_cls, args, *, host: str = "127.0.0.1", port: int = 8000):
                 "last_resumed_at": (int,),
                 "last_used_at": (int,),
                 "last_user_send_ms": (int,),
+                "last_user_text": (str,),
                 "run_id": (str,),
-                "title": (str, type(None)),
+                "title": (str,),
             }
             for k, types in schema.items():
                 if not isinstance(meta.get(k), types):
                     return False
-            return bool(str(meta["run_id"]).strip())
+            if not str(meta["run_id"]).strip():
+                return False
+            if not str(meta["model"]).strip():
+                return False
+            return True
 
         def _read_meta(self, run_dir: str) -> dict | None:
             path = os.path.join(run_dir, "metadata.json")
             if not os.path.isfile(path):
                 return None
-            with open(path, "r", encoding="utf-8") as fp:
-                return json.load(fp)
+            try:
+                with open(path, "r", encoding="utf-8") as fp:
+                    meta = json.load(fp)
+            except Exception:
+                meta = None
+            if not isinstance(meta, dict) or not self._is_valid_meta(meta):
+                logging.warning(f"Invalid metadata schema, deleting: {path}")
+                try:
+                    os.remove(path)
+                except Exception:
+                    pass
+                return None
+            return meta
 
         def _write_meta(self, run_dir: str, meta: dict) -> None:
             path = os.path.join(run_dir, "metadata.json")
-            with open(path, "w", encoding="utf-8") as fp:
+            tmp = f"{path}.tmp.{uuid.uuid4().hex}"
+            with open(tmp, "w", encoding="utf-8") as fp:
                 json.dump(meta, fp, ensure_ascii=False, indent=2)
+            os.replace(tmp, path)
 
         def touch(self, run_dir: str) -> None:
             meta = self._read_meta(run_dir)
@@ -223,9 +243,7 @@ def run_web(agent_cls, args, *, host: str = "127.0.0.1", port: int = 8000):
                 return
             t = time()
             meta["last_user_send_ms"] = int(t * 1000)
-            base = "".join(ch for ch in str(user_text) if not ch.isspace())[:10]
-            if base:
-                meta["title"] = base
+            meta["last_user_text"] = str(user_text).strip()
             self._write_meta(run_dir, meta)
 
         def mark_clicked(self, run_dir: str) -> None:
@@ -327,6 +345,7 @@ def run_web(agent_cls, args, *, host: str = "127.0.0.1", port: int = 8000):
             with self.lock:
                 active_ids = set(self.sessions.keys())
                 active_map = dict(self.sessions)
+                run_models = dict(self.run_models)
             try:
                 names = os.listdir(base_output_dir)
             except Exception:
@@ -343,9 +362,12 @@ def run_web(agent_cls, args, *, host: str = "127.0.0.1", port: int = 8000):
                     title = meta["title"]
                     created_at = meta["created_at"]
                     last_user_send_ms = meta["last_user_send_ms"]
+                    last_user_text = meta["last_user_text"]
                     created_at_ts = meta["created_at_ts"]
                     state = "active" if rid in active_ids else "default"
                     s = active_map.get(rid)
+                    model = s.model if s is not None else str(run_models.get(rid, "") or meta.get("model") or "").strip()
+                    model_name = model_presets[model]["model_name"] if model else ""
                     if s is None:
                         load_state = "unloaded"
                     elif s._closed.is_set():
@@ -362,9 +384,12 @@ def run_web(agent_cls, args, *, host: str = "127.0.0.1", port: int = 8000):
                             "title": title,
                             "created_at": created_at,
                             "last_user_send_ms": last_user_send_ms,
+                            "last_user_text": last_user_text,
                             "created_at_ts": created_at_ts,
                             "state": state,
                             "load_state": load_state,
+                            "model": model,
+                            "model_name": model_name,
                         }
                     )
                 except Exception:
@@ -394,33 +419,24 @@ def run_web(agent_cls, args, *, host: str = "127.0.0.1", port: int = 8000):
                     continue
             return None
 
-        def _args_for_new(self):
+        def _args_for_load(self, run_dir: str, model: str):
+            cfg = model_presets[model]
             return SimpleNamespace(
-                api_type=template_api_type,
-                load_path="",
-                memory_dir=memory_dir,
-                model=template_model,
-                no_stream=template_no_stream,
-                output_path=base_output_dir,
-                save_name="",
-                web=False,
-                configure_logging=False,
-            )
-
-        def _args_for_load(self, meta: dict, run_dir: str):
-            return SimpleNamespace(
-                api_type=template_api_type,
+                api_type=cfg["api_type"],
                 load_path=run_dir,
                 memory_dir=memory_dir,
-                model=template_model,
-                no_stream=template_no_stream,
+                memory_backup=memory_backup,
+                model=model,
+                model_kwargs=cfg["model_kwargs"],
                 output_path=base_output_dir,
                 save_name="",
+                show_system_prompt=show_system_prompt,
+                special_tokens=cfg["special_tokens"],
                 web=False,
                 configure_logging=False,
             )
 
-        def create_new_session(self) -> Session:
+        def create_new_session(self, model: str | None = None) -> Session:
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
             run_name = ts
             run_dir = os.path.join(base_output_dir, run_name)
@@ -448,22 +464,33 @@ def run_web(agent_cls, args, *, host: str = "127.0.0.1", port: int = 8000):
             run_id = uuid.uuid4().hex
             now_ts = int(time() * 1000)
             meta = {
-                "config": {"api_type": template_api_type, "memory_dir": memory_dir, "model": template_model, "stream": not template_no_stream},
+                "config": {},
+                "model": "",
                 "created_at": datetime.now().isoformat(),
                 "created_at_ts": int(time()),
                 "last_used_at": int(time()),
                 "last_user_send_ms": now_ts,
+                "last_user_text": "",
                 "ever_activated": True,
                 "last_clicked_at": int(time()),
                 "last_resumed_at": 0,
                 "last_interrupted_at": 0,
                 "run_id": run_id,
-                "title": None,
+                "title": "",
             }
+            m = str(model or self.current_model or "").strip()
+            if not m:
+                raise ValueError("Missing model")
+            if not isinstance(model_presets, dict) or m not in model_presets:
+                raise ValueError("Unknown model")
+            meta["model"] = m
             self._write_meta(run_dir, meta)
             open(os.path.join(messages_dir, "messages.jsonl"), "a", encoding="utf-8").close()
             s = Session(run_id=run_id, run_dir=run_dir, halted=False)
-            s._ensure_build_started(lambda: self._args_for_load(meta, run_dir))
+            with self.lock:
+                self.run_models[run_id] = m
+            s.model = m
+            s._ensure_build_started(lambda: self._args_for_load(run_dir, m))
             self.activate(s)
             return s
 
@@ -483,7 +510,11 @@ def run_web(agent_cls, args, *, host: str = "127.0.0.1", port: int = 8000):
             rid = meta["run_id"]
             halted = meta["last_interrupted_at"] > meta["last_resumed_at"]
             s = Session(run_id=rid, run_dir=run_dir, halted=halted)
-            s._ensure_build_started(lambda: self._args_for_load(meta, run_dir))
+            with self.lock:
+                m = self.run_models.get(rid) or str(meta.get("model") or "").strip() or self.current_model
+                self.run_models[rid] = m
+            s.model = m
+            s._ensure_build_started(lambda: self._args_for_load(run_dir, m))
             if activate:
                 self.activate(s)
             return s
@@ -543,18 +574,19 @@ def run_web(agent_cls, args, *, host: str = "127.0.0.1", port: int = 8000):
                     if not session._wait_ready(timeout=30.0):
                         raise RuntimeError("session not ready")
                     if session.build_error is not None:
-                        raise RuntimeError(f"session build failed: {type(session.build_error).__name__}")
+                        raise RuntimeError(f"session build failed: {type(session.build_error).__name__}: {str(session.build_error)}")
                     if session.agent is None or session.agent.config is None:
                         raise RuntimeError("session agent config is missing")
                     agent_cfg = session.agent.config
+                    current_model = session.model
                     start_payload = json.dumps(
                         {
                             "run_id": session.run_id,
                             "type": "run_start",
                             "data": {
                                 "has_history": bool(history),
-                                "thinking_token": agent_cfg.thinking_token,
-                                "model": agent_cfg.model,
+                                "special_tokens": getattr(agent_cfg, "special_tokens", None),
+                                "model": current_model,
                                 "initialized": True,
                             },
                         },
@@ -600,10 +632,38 @@ def run_web(agent_cls, args, *, host: str = "127.0.0.1", port: int = 8000):
         response.content_type = "application/json; charset=utf-8"
         return json.dumps({"status": "success", "sessions": manager.list_sessions()}, ensure_ascii=False)
 
+    @app.get("/api/model_presets")
+    def api_model_presets():
+        response.content_type = "application/json; charset=utf-8"
+        presets_out: list[dict] = []
+        if isinstance(model_presets, dict):
+            for m in sorted(model_presets.keys()):
+                v = model_presets.get(m)
+                if not isinstance(v, dict):
+                    continue
+                presets_out.append(
+                    {
+                        "model": m,
+                        "label": str(v.get("label") or m),
+                        "api_type": v.get("api_type"),
+                        "model_name": v.get("model_name"),
+                        "special_tokens": v.get("special_tokens")
+                        if isinstance(v.get("special_tokens"), dict)
+                        else {
+                            "thinking": v.get("thinking_token") or "thinking",
+                            "toolcall": v.get("toolcall_token") or "toolcall",
+                        },
+                    }
+                )
+        return json.dumps({"status": "success", "default": default_model, "models": presets_out}, ensure_ascii=False)
+
     @app.post("/api/sessions/new")
     def api_sessions_new():
         try:
-            s = manager.create_new_session()
+            data = request.json or {}
+            model = data.get("model")
+            m = "" if model is None else str(model).strip()
+            s = manager.create_new_session(m if m else None)
             response.content_type = "application/json; charset=utf-8"
             return json.dumps({"status": "success", "run_id": s.run_id}, ensure_ascii=False)
         except Exception:
@@ -623,6 +683,21 @@ def run_web(agent_cls, args, *, host: str = "127.0.0.1", port: int = 8000):
             response.status = 400
             return {"status": "error", "error": "missing title"}
         manager.set_title(str(rid), str(title))
+        return {"status": "success"}
+
+    @app.post("/api/sessions/preset")
+    def api_sessions_preset():
+        data = request.json or {}
+        model = data.get("model")
+        m = "" if model is None else str(model).strip()
+        if not m:
+            response.status = 400
+            return {"status": "error", "error": "missing model"}
+        if not isinstance(model_presets, dict) or m not in model_presets:
+            response.status = 404
+            return {"status": "error", "error": "unknown model"}
+        with manager.lock:
+            manager.current_model = m
         return {"status": "success"}
 
     @app.post("/api/sessions/delete")

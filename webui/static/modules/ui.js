@@ -1,4 +1,4 @@
-import { chatInnerEl, chatTitleEl, inputEl, jumpBtn, loadingEl, newChatBtn, sendBtn, statusEl } from "./dom.js";
+import { chatInnerEl, chatTitleEl, chatTitleMetaEl, chatTitleTextEl, inputEl, jumpBtn, loadingEl, newChatBtn, sendBtn, statusEl } from "./dom.js";
 import { state } from "./state.js";
 
 export function setLoading(on) {
@@ -18,10 +18,22 @@ export function setChatTitle(title) {
   if (!chatTitleEl) return;
   if (!t) {
     chatTitleEl.classList.add("hidden");
-    chatTitleEl.textContent = "";
+    if (chatTitleTextEl) chatTitleTextEl.textContent = "";
+    if (chatTitleMetaEl) chatTitleMetaEl.textContent = "";
     return;
   }
-  chatTitleEl.textContent = t;
+  if (chatTitleTextEl) chatTitleTextEl.textContent = t;
+  chatTitleEl.classList.remove("hidden");
+}
+
+export function setChatTitleMeta(meta) {
+  const t = String(meta || "").trim();
+  if (!chatTitleEl) return;
+  if (!t) {
+    if (chatTitleMetaEl) chatTitleMetaEl.textContent = "";
+    return;
+  }
+  if (chatTitleMetaEl) chatTitleMetaEl.textContent = t;
   chatTitleEl.classList.remove("hidden");
 }
 

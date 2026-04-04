@@ -15,15 +15,20 @@
           <div id="status" class="status-pill" aria-live="polite">连接中…</div>
         </div>
         <div class="shell-right">
-          <div id="chatTitle" class="chat-titlebar hidden"></div>
+          <div id="chatTitle" class="chat-titlebar hidden">
+            <div id="chatTitleText" class="chat-title-text"></div>
+            <div id="chatTitleMeta" class="chat-title-meta"></div>
+          </div>
         </div>
       </div>
 
       <div class="body">
         <aside class="sidebar" aria-label="会话列表">
-          <div id="sessions" class="sessions" role="list">
+          <div class="sessions-top">
             <button id="newChat" class="btn btn-primary btn-small" type="button">新建会话</button>
+            <select id="modelSelect" class="model-select model-select-sessions" aria-label="新会话模型"></select>
           </div>
+          <div id="sessions" class="sessions" role="list"></div>
         </aside>
 
         <div class="right">
@@ -31,7 +36,6 @@
             <div id="chatInner" class="chat-inner">
               <div class="empty">
                 <div class="empty-title">开始对话</div>
-                <div class="empty-subtitle">给 EvoAgent 发消息</div>
               </div>
             </div>
             <div id="loading" class="loading hidden" aria-label="加载中">
@@ -46,7 +50,6 @@
               <textarea id="input" class="input" rows="1" placeholder="给 EvoAgent 发消息…（Shift+Enter 换行）" spellcheck="false"></textarea>
               <button id="send" class="btn btn-primary" type="button">发送</button>
             </div>
-            <div class="hint">给 EvoAgent 发消息</div>
           </footer>
         </div>
       </div>

@@ -6,9 +6,7 @@ def get_argparser(parser: argparse.ArgumentParser | None = None) -> argparse.Arg
         parser = argparse.ArgumentParser(description="EvoAgent main entry point")
 
     # Core runtime config
-    parser.add_argument("--api_type", type=str, default=None, choices=["openai", "anthropic"], help="Force API type (optional).")
-    parser.add_argument("--model", type=str, required=True, help="Model name or path for WorkerNode")
-    parser.add_argument("--no_stream", action="store_true", help="Disable streaming")
+    parser.add_argument("--model", type=str, default=None, help="Model id (default uses EVOAGENT_DEFAULT_MODEL)")
     parser.add_argument("--show_system_prompt", action="store_true", help="Show system prompt in outputs")
 
     # I/O and persistence

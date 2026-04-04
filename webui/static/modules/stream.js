@@ -77,7 +77,7 @@ export function finalizeStreamingToParsed(finalText) {
     if (prev && prev.textContent === "·") prev.remove();
     typingEl.remove();
   }
-  renderParsedAssistant(state.streamingMsgEl.content, finalText);
+  renderParsedAssistant(state.streamingMsgEl.content, finalText, state.specialTokens);
   scrollToBottom(Boolean(state.streamAutoScroll));
   state.streamingText = "";
   state.streamDisplayText = "";
@@ -89,13 +89,17 @@ export function finalizeStreamingToParsed(finalText) {
   return true;
 }
 
-export function toolcallDominates(text) {
+export function toolcallDominates(text, tokens) {
   const s = String(text || "");
-  const start = s.indexOf("<toolcall>");
+  const tok = tokens && typeof tokens === "object" ? tokens : null;
+  const toolToken = String((tok && tok.toolcall) || (state.specialTokens && state.specialTokens.toolcall) || "toolcall").trim() || "toolcall";
+  const open = `<${toolToken}>`;
+  const close = `</${toolToken}>`;
+  const start = s.indexOf(open);
   if (start < 0) return false;
-  const end0 = s.lastIndexOf("</toolcall>");
+  const end0 = s.lastIndexOf(close);
   if (end0 < 0 || end0 < start) return false;
-  const end = end0 + "</toolcall>".length;
+  const end = end0 + close.length;
   const g1 = s.slice(0, start);
   const g2 = s.slice(start, end);
   const g3 = s.slice(end);

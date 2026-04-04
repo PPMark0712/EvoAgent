@@ -16,7 +16,7 @@
 ## 通用回复格式
 任何时候都必须先输出 <[[thinking_token]]>{思考过程}</[[thinking_token]]>，思考结束后：
 1. 调工具：紧跟 toolcall 块
-2. 直接答：不输出 <toolcall>，直接回复用户正文
+2. 直接答：不输出 <[[toolcall_token]]>，直接回复用户正文
 
 ## 工具调用
 
@@ -27,7 +27,7 @@
 
 ### 工具调用规则
 1. 当你判断需要使用工具才能完成任务时，必须严格按照指定格式输出工具调用指令。
-2. <toolcall> 内可包含一个或多个 <function>，以支持一次调用多个工具。
+2. <[[toolcall_token]]> 内可包含一个或多个 <function>，以支持一次调用多个工具。
 3. 每个 <function> 必须带 name 属性来指定工具名称，参数必须用 <parameter> 传入：
    - <function name="tool_name"> ... </function>
    - <parameter name="param_name">param_value</parameter>

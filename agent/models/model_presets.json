@@ -1,0 +1,86 @@
+{
+    "qwen3-max": {
+        "label": "Qwen3-Max",
+        "api_type": "openai",
+        "model_name": "qwen3-max",
+        "api_key_env": "QWEN_OPENAI_API_KEY",
+        "api_base_env": "QWEN_OPENAI_API_BASE",
+        "stream": true,
+        "special_tokens": {
+            "thinking": "thinking",
+            "toolcall": "toolcall"
+        },
+        "model_kwargs": {
+            "stream_usage": true,
+            "extra_body": {
+                "enable_thinking": false
+            }
+        }
+    },
+    "qwen3.5-flash": {
+        "label": "Qwen3.5-Flash",
+        "api_type": "openai",
+        "model_name": "qwen3.5-flash",
+        "api_key_env": "QWEN_OPENAI_API_KEY",
+        "api_base_env": "QWEN_OPENAI_API_BASE",
+        "stream": true,
+        "special_tokens": {
+            "thinking": "thinking",
+            "toolcall": "toolcall"
+        },
+        "model_kwargs": {
+            "stream_usage": true,
+            "extra_body": {
+                "enable_thinking": false
+            }
+        }
+    },
+    "qwen3.5-plus": {
+        "label": "Qwen3.5-Plus",
+        "api_type": "openai",
+        "model_name": "qwen3.5-plus",
+        "api_key_env": "QWEN_OPENAI_API_KEY",
+        "api_base_env": "QWEN_OPENAI_API_BASE",
+        "stream": true,
+        "special_tokens": {
+            "thinking": "thinking",
+            "toolcall": "toolcall"
+        },
+        "model_kwargs": {
+            "stream_usage": true,
+            "extra_body": {
+                "enable_thinking": false
+            }
+        }
+    },
+    "qwen3.6-plus": {
+        "label": "Qwen3.6-Plus",
+        "api_type": "openai",
+        "model_name": "qwen3.6-plus",
+        "api_key_env": "QWEN_OPENAI_API_KEY",
+        "api_base_env": "QWEN_OPENAI_API_BASE",
+        "stream": true,
+        "special_tokens": {
+            "thinking": "thinking",
+            "toolcall": "toolcall"
+        },
+        "model_kwargs": {
+            "stream_usage": true,
+            "extra_body": {
+                "enable_thinking": false
+            }
+        }
+    },
+    "minimax-m2.7": {
+        "label": "MiniMax-M2.7",
+        "api_type": "openai",
+        "model_name": "Minimax-M2.7",
+        "api_key_env": "MINIMAX_OPENAI_API_KEY",
+        "api_base_env": "MINIMAX_OPENAI_API_BASE",
+        "stream": true,
+        "special_tokens": {
+            "thinking": "think",
+            "toolcall": "toolcall"
+        }
+    }
+}

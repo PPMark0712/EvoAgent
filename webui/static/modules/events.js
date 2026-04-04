@@ -15,23 +15,25 @@ export async function onEventMessage(e) {
 
   if (ev.type === "run_start") {
     if (ev.data) {
-      if (ev.data.thinking_token != null) state.thinkingToken = String(ev.data.thinking_token).trim();
+      if (ev.data.special_tokens && typeof ev.data.special_tokens === "object") {
+        state.specialTokens = ev.data.special_tokens;
+      } else {
+        state.specialTokens = { thinking: "thinking", toolcall: "toolcall" };
+      }
+      state.thinkingToken = String((state.specialTokens && state.specialTokens.thinking) || "").trim();
       if (!ev.data.has_history) {
         setLoading(false);
       }
     }
-    if (ev.run_id && state.loadingRunIds instanceof Set) {
-      state.loadingRunIds.delete(String(ev.run_id));
-      renderSessions(state.sessionsCache);
-    }
+    if (ev.run_id && state.loadingRunIds instanceof Set) state.loadingRunIds.delete(String(ev.run_id));
     if (ev.run_id && String(ev.run_id) === state.activeRunId) {
       setInputEnabled(true);
     }
     if (!state.inFlight && !state.streamingMsgEl && !state.streamQueue && !state.streamingText) {
       clearStreaming();
     }
+    if (state.sessionEditingRunId) return;
     await refreshSessions();
-    renderSessions(state.sessionsCache);
     return;
   }
 
@@ -55,6 +57,7 @@ export async function onEventMessage(e) {
     ensureStreaming();
     scheduleStreamRender();
     state.inFlight = true;
+    state.inFlightRunId = String(ev.run_id || "");
     if (!state.askPendingId) setSendMode("stop");
     return;
   }
@@ -81,17 +84,40 @@ export async function onEventMessage(e) {
                 }
               })();
         const src = m.data && m.data.additional_kwargs ? String(m.data.additional_kwargs.source || "") : "";
+        const tokens =
+          m.data && m.data.additional_kwargs && m.data.additional_kwargs.special_tokens && typeof m.data.additional_kwargs.special_tokens === "object"
+            ? m.data.additional_kwargs.special_tokens
+            : state.specialTokens;
         if (t === "human" && src === "tool") appendMessage("system", c, { render: "tool" });
         else if (t === "human") appendMessage("user", c);
-        else if (t === "ai") appendMessage("assistant", c, { parseTags: true });
+        else if (t === "ai") appendMessage("assistant", c, { parseTags: true, tokens });
         else if (t === "system") {
           appendMessage("system", c, { forceScroll: !state.initialSystemPromptShown, markdown: true });
           state.initialSystemPromptShown = true;
         }
       }
-      state.inFlight = false;
+      const aiMsg = msgs.findLast ? msgs.findLast((x) => String(x.type || "").trim() === "ai") : [...msgs].reverse().find((x) => String(x.type || "").trim() === "ai");
+      const aiText =
+        aiMsg && aiMsg.data && aiMsg.data.content != null
+          ? typeof aiMsg.data.content === "string"
+            ? aiMsg.data.content
+            : (() => {
+                try {
+                  return JSON.stringify(aiMsg.data.content);
+                } catch {
+                  return String(aiMsg.data.content);
+                }
+              })()
+          : "";
+      const aiTokens =
+        aiMsg && aiMsg.data && aiMsg.data.additional_kwargs && aiMsg.data.additional_kwargs.special_tokens && typeof aiMsg.data.additional_kwargs.special_tokens === "object"
+          ? aiMsg.data.additional_kwargs.special_tokens
+          : state.specialTokens;
+      const inflight = aiMsg && toolcallDominates(aiText, aiTokens);
+      state.inFlight = Boolean(inflight);
+      state.inFlightRunId = inflight ? String(ev.run_id || "") : "";
       state.stopRequested = false;
-      if (!state.askPendingId) setSendMode("send");
+      if (!state.askPendingId) setSendMode(inflight ? "stop" : "send");
       scrollToBottom(true);
       setLoading(false);
       return;
@@ -137,8 +163,12 @@ export async function onEventMessage(e) {
               }
             })();
       const src = m.data && m.data.additional_kwargs ? String(m.data.additional_kwargs.source || "") : "";
+      const tokens =
+        m.data && m.data.additional_kwargs && m.data.additional_kwargs.special_tokens && typeof m.data.additional_kwargs.special_tokens === "object"
+          ? m.data.additional_kwargs.special_tokens
+          : state.specialTokens;
       if (t === "human" && src === "tool") appendMessage("system", c, { render: "tool" });
-      else if (t === "ai") appendMessage("assistant", c, { parseTags: true });
+      else if (t === "ai") appendMessage("assistant", c, { parseTags: true, tokens });
       else if (t === "system") {
         appendMessage("system", c, { forceScroll: !state.initialSystemPromptShown, markdown: true });
         state.initialSystemPromptShown = true;
@@ -157,17 +187,24 @@ export async function onEventMessage(e) {
               }
             })()
         : "";
+    const aiTokens =
+      aiMsg && aiMsg.data && aiMsg.data.additional_kwargs && aiMsg.data.additional_kwargs.special_tokens && typeof aiMsg.data.additional_kwargs.special_tokens === "object"
+        ? aiMsg.data.additional_kwargs.special_tokens
+        : state.specialTokens;
 
     if (interrupted) {
       state.inFlight = false;
+      if (String(ev.run_id || "") === String(state.inFlightRunId || "")) state.inFlightRunId = "";
       state.stopRequested = false;
       if (!state.askPendingId) setSendMode("send");
     } else if (aiMsg) {
-      if (toolcallDominates(aiText)) {
+      if (toolcallDominates(aiText, aiTokens)) {
         state.inFlight = true;
+        state.inFlightRunId = String(ev.run_id || "");
         if (!state.askPendingId) setSendMode("stop");
       } else {
         state.inFlight = false;
+        if (String(ev.run_id || "") === String(state.inFlightRunId || "")) state.inFlightRunId = "";
         if (!state.askPendingId) setSendMode("send");
       }
     }

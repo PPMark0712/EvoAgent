@@ -1,8 +1,8 @@
-import { inputEl, sessionsEl, newChatBtn } from "./dom.js";
+import { inputEl, sessionsEl, newChatBtn, modelSelectEl } from "./dom.js";
 import { state } from "./state.js";
 import { fetchSessions, postJson } from "./api.js";
 import { clearStreaming } from "./stream.js";
-import { setAskPending, setBackendDown, setChatTitle, setInputEnabled, setLoading, setSendMode, setStatus, updateJump } from "./ui.js";
+import { setAskPending, setBackendDown, setChatTitle, setChatTitleMeta, setInputEnabled, setLoading, setSendMode, setStatus, updateJump } from "./ui.js";
 
 let onEventMessage = null;
 let deletePopoverEl = null;
@@ -10,6 +10,23 @@ let deletePopoverTimer = 0;
 let loadingPollTimer = 0;
 let loadingPollInFlight = false;
 let suppressBackendDownUntil = 0;
+
+function _modelLabel(model) {
+  const m = String(model || "").trim();
+  if (!m) return "";
+  const map = state.modelPresetLabelMap;
+  if (map && typeof map.get === "function") {
+    const v = map.get(m);
+    if (v) return String(v);
+  }
+  if (Array.isArray(state.modelPresets)) {
+    for (const p of state.modelPresets) {
+      const pm = String(p && p.model ? p.model : "").trim();
+      if (pm && pm === m) return String(p && p.label ? p.label : m);
+    }
+  }
+  return m;
+}
 
 function _closeEventsSilently() {
   try {
@@ -42,6 +59,7 @@ function _ensureLoadingPoll() {
       _stopLoadingPoll();
       return;
     }
+    if (state.sessionEditingRunId) return;
     if (loadingPollInFlight) return;
     loadingPollInFlight = true;
     try {
@@ -118,6 +136,63 @@ function _openDeletePopover(anchorEl, onConfirm) {
 
 export function initSessions(handler) {
   onEventMessage = handler;
+  if (modelSelectEl) {
+    modelSelectEl.textContent = "";
+    const placeholder = document.createElement("option");
+    placeholder.value = "";
+    placeholder.textContent = "未配置模型";
+    modelSelectEl.append(placeholder);
+    modelSelectEl.disabled = true;
+    modelSelectEl.addEventListener("change", async (e) => {
+      const v = e && e.target ? String(e.target.value || "").trim() : "";
+      if (!v) return;
+      if (v === String(state.newSessionModel || "").trim()) return;
+      modelSelectEl.disabled = true;
+      try {
+        state.newSessionModel = v;
+        await postJson("/api/sessions/preset", { model: v });
+        await refreshSessions();
+        renderSessions(state.sessionsCache);
+      } finally {
+        modelSelectEl.disabled = !(Array.isArray(state.modelPresets) && state.modelPresets.length > 0);
+      }
+    });
+    fetch("/api/model_presets")
+      .then((r) => r.json())
+      .then((data) => {
+        if (!data || data.status !== "success" || !Array.isArray(data.models)) return;
+        state.modelPresets = data.models;
+        if (!(state.modelPresetLabelMap instanceof Map)) state.modelPresetLabelMap = new Map();
+        state.modelPresetLabelMap.clear();
+        for (const p of data.models) {
+          const m = String(p && p.model ? p.model : "").trim();
+          if (!m) continue;
+          const label = String(p && p.label ? p.label : m);
+          state.modelPresetLabelMap.set(m, label);
+        }
+        modelSelectEl.textContent = "";
+        if (data.models.length === 0) {
+          const opt = document.createElement("option");
+          opt.value = "";
+          opt.textContent = "未配置模型";
+          modelSelectEl.append(opt);
+          modelSelectEl.disabled = true;
+          return;
+        }
+        for (const p of data.models) {
+          const m = String(p && p.model ? p.model : "").trim();
+          if (!m) continue;
+          const opt = document.createElement("option");
+          opt.value = m;
+          opt.textContent = String(p && p.label ? p.label : m);
+          modelSelectEl.append(opt);
+        }
+        state.newSessionModel = String(data.default || "").trim();
+        if (state.newSessionModel) modelSelectEl.value = state.newSessionModel;
+        modelSelectEl.disabled = false;
+      })
+      .catch(() => {});
+  }
   newChatBtn.addEventListener("click", async () => {
     if (state.newSessionPending) return;
     state.newSessionPending = true;
@@ -126,8 +201,11 @@ export function initSessions(handler) {
       await refreshSessions();
       const newest = state.sessionsCache && state.sessionsCache.length ? state.sessionsCache[0] : null;
       const newestId = newest ? String(newest.run_id || "").trim() : "";
+      const newestUserText = newest ? String(newest.last_user_text || "").trim() : "";
       const newestTitle = newest ? String(newest.title || "").trim() : "";
-      if (newestId && !newestTitle) {
+      const newestModel = newest ? String(newest.model || "").trim() : "";
+      const targetModel = String(state.newSessionModel || "").trim();
+      if (newestId && !newestUserText && !newestTitle && newestModel === targetModel) {
         if (newestId === state.activeRunId) {
           requestAnimationFrame(() => inputEl.focus());
         } else {
@@ -137,7 +215,7 @@ export function initSessions(handler) {
       }
 
       setLoading(true);
-      const created = await postJson("/api/sessions/new", {});
+      const created = await postJson("/api/sessions/new", { model: String(state.newSessionModel || "").trim() });
       await refreshSessions();
       const rid = created && created.run_id ? String(created.run_id).trim() : "";
       if (rid) {
@@ -161,19 +239,26 @@ function _formatUpdatedAt(ms) {
   if (!Number.isFinite(n) || n <= 0) return "";
   const d = new Date(n);
   if (Number.isNaN(d.getTime())) return "";
-  return d.toLocaleString();
+  const yy = String(d.getFullYear());
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mi = String(d.getMinutes()).padStart(2, "0");
+  const ss = String(d.getSeconds()).padStart(2, "0");
+  return `${yy}-${mm}-${dd}\n${hh}:${mi}:${ss}`;
 }
 
 function _formatTitleDate(iso) {
   if (!iso) return "";
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "";
+  const yy = String(d.getFullYear());
   const mm = String(d.getMonth() + 1).padStart(2, "0");
   const dd = String(d.getDate()).padStart(2, "0");
   const hh = String(d.getHours()).padStart(2, "0");
   const mi = String(d.getMinutes()).padStart(2, "0");
   const ss = String(d.getSeconds()).padStart(2, "0");
-  return `${mm}${dd}_${hh}:${mi}:${ss}`;
+  return `${yy}-${mm}-${dd} ${hh}:${mi}:${ss}`;
 }
 
 export function renderSessions(list) {
@@ -185,12 +270,9 @@ export function renderSessions(list) {
   const now = Date.now();
   let anyBuilding = false;
   sessionsEl.textContent = "";
-  const top = document.createElement("div");
-  top.className = "sessions-top";
-  top.append(newChatBtn);
-  sessionsEl.append(top);
   if (state.sessionsCache.length === 0) {
     setChatTitle("");
+    setChatTitleMeta("");
     const empty = document.createElement("div");
     empty.className = "session-empty";
     empty.textContent = "暂无会话";
@@ -198,6 +280,8 @@ export function renderSessions(list) {
     return;
   }
   let activeTitle = "";
+  let activeModel = "";
+  let activeCreatedAt = "";
   for (const s of state.sessionsCache) {
     const runId = String(s.run_id || "").trim();
     if (!runId) continue;
@@ -237,15 +321,34 @@ export function renderSessions(list) {
     const title = document.createElement("div");
     title.className = "session-title";
     const base = s.title == null ? "" : String(s.title).trim();
-    const createdAt = _formatTitleDate(String(s.created_at || ""));
-    const displayBase = base || "新对话";
-    const displayTitle = createdAt ? `${displayBase}_${createdAt}` : displayBase;
+    const displayBase = base || "新会话";
+    const displayTitle = displayBase;
     title.textContent = displayTitle;
-    if (runId === state.activeRunId) activeTitle = displayTitle;
+    if (runId === state.activeRunId) {
+      activeTitle = displayTitle;
+      activeModel = String(s.model || "").trim();
+      activeCreatedAt = String(s.created_at || "").trim();
+    }
 
-    const sub = document.createElement("div");
-    sub.className = "session-sub";
-    sub.textContent = _formatUpdatedAt(s.last_user_send_ms);
+    const preview = document.createElement("div");
+    preview.className = "session-preview";
+    preview.textContent = String(s.last_user_text || "").trim();
+    const updated = document.createElement("div");
+    updated.className = "session-time";
+    updated.textContent = _formatUpdatedAt(s.last_user_send_ms);
+    const modelTag = document.createElement("span");
+    modelTag.className = "session-model";
+    modelTag.textContent = _modelLabel(s.model);
+
+    const main = document.createElement("div");
+    main.className = "session-main";
+    const topRow = document.createElement("div");
+    topRow.className = "session-row session-row-top";
+    topRow.append(title, modelTag);
+    const bottomRow = document.createElement("div");
+    bottomRow.className = "session-row session-row-bottom";
+    bottomRow.append(updated, preview);
+    main.append(topRow, bottomRow);
 
     const actions = document.createElement("div");
     actions.className = "session-actions";
@@ -258,12 +361,14 @@ export function renderSessions(list) {
     const editBtn = document.createElement("button");
     editBtn.className = "session-btn";
     editBtn.type = "button";
-    editBtn.textContent = "编辑";
+    editBtn.textContent = "✎";
+    editBtn.title = "编辑";
     editBtn.addEventListener("click", async (e) => {
       e.preventDefault();
       e.stopPropagation();
       const existing = title.querySelector("input");
       if (existing) return;
+      state.sessionEditingRunId = runId;
       const input = document.createElement("input");
       input.className = "session-title-input";
       input.type = "text";
@@ -274,34 +379,47 @@ export function renderSessions(list) {
       input.addEventListener("mousedown", (ev) => ev.stopPropagation());
       input.addEventListener("click", (ev) => ev.stopPropagation());
       const restore = () => {
-        title.textContent = base ? `${base}_${createdAt}` : createdAt;
+        title.textContent = displayTitle;
       };
       let done = false;
+      let composing = false;
       const commit = async () => {
         if (done) return;
         done = true;
         const t = String(input.value || "").trim();
         if (!t) {
+          state.sessionEditingRunId = "";
           restore();
           return;
         }
         input.disabled = true;
         await postJson("/api/sessions/title", { run_id: runId, title: t });
+        state.sessionEditingRunId = "";
         await refreshSessions();
-        renderSessions(state.sessionsCache);
       };
+      input.addEventListener("compositionstart", () => {
+        composing = true;
+      });
+      input.addEventListener("compositionend", () => {
+        composing = false;
+      });
       input.addEventListener("keydown", (ev) => {
         if (ev.key === "Enter") {
+          if (composing || ev.isComposing || ev.keyCode === 229) return;
           ev.preventDefault();
           commit();
         } else if (ev.key === "Escape") {
           ev.preventDefault();
           done = true;
+          state.sessionEditingRunId = "";
           restore();
         }
       });
       input.addEventListener("blur", () => commit());
-      requestAnimationFrame(() => input.focus());
+      requestAnimationFrame(() => {
+        input.focus();
+        input.select();
+      });
     });
 
     deleteBtn.addEventListener("click", (e) => {
@@ -331,8 +449,9 @@ export function renderSessions(list) {
       });
     });
 
-    actions.append(deleteBtn, editBtn);
-    item.append(title, sub, actions);
+    item.append(deleteBtn);
+    actions.append(editBtn);
+    item.append(main, actions);
     sessionsEl.append(item);
   }
   if (state.loadingRunIds instanceof Set) {
@@ -345,24 +464,28 @@ export function renderSessions(list) {
   if ((state.loadingRunIds instanceof Set && state.loadingRunIds.size > 0) || anyBuilding) _ensureLoadingPoll();
   else _stopLoadingPoll();
   setChatTitle(activeTitle);
+  setChatTitleMeta(activeCreatedAt ? `创建时间：${_formatTitleDate(activeCreatedAt)}` : "");
+  state.activeModel = activeModel;
   for (const [rid, until] of fadeMap.entries()) {
     if (until <= now) fadeMap.delete(rid);
   }
   state.prevActiveIds = currentActiveIds;
   state.activeFadeUntil = fadeMap;
   state.activeFadeTimers = fadeTimers;
-  setSendMode(state.inFlight && !state.askPendingId ? "stop" : "send");
+  const inflight = state.inFlight && String(state.inFlightRunId || "") === String(state.activeRunId || "");
+  setSendMode(inflight && !state.askPendingId ? "stop" : "send");
 }
 
 export function resetConversationUI() {
   const html =
-    '<div class="empty"><div class="empty-title">开始对话</div><div class="empty-subtitle">给 EvoAgent 发消息</div></div>';
+    '<div class="empty"><div class="empty-title">开始对话</div></div>';
   const chatInnerEl = document.getElementById("chatInner");
   chatInnerEl.innerHTML = html;
   state.initialSystemPromptShown = false;
   clearStreaming();
   setAskPending(null, "");
   state.inFlight = false;
+  state.inFlightRunId = "";
   state.stopRequested = false;
   setSendMode("send");
   updateJump();
@@ -377,6 +500,7 @@ export function connectEvents(runId) {
   state.es.onopen = () => setStatus("已连接", "ok");
   state.es.onerror = () => {
     if (Date.now() < suppressBackendDownUntil) return;
+    if (state.es && state.es.readyState === 2) return;
     setBackendDown();
   };
   state.es.onmessage = onEventMessage;
@@ -397,13 +521,28 @@ export function switchSession(runId) {
   requestAnimationFrame(() => inputEl.focus());
 }
 
+export function reloadSession(runId) {
+  const rid = String(runId || "").trim();
+  if (!rid) return;
+  if (rid !== state.activeRunId) state.activeRunId = rid;
+  if (state.loadingRunIds instanceof Set) state.loadingRunIds.add(rid);
+  _ensureLoadingPoll();
+  setLoading(true);
+  resetConversationUI();
+  renderSessions(state.sessionsCache);
+  setInputEnabled(true);
+  connectEvents(rid);
+  requestAnimationFrame(() => inputEl.focus());
+}
+
 export async function refreshSessions() {
   const data = await fetchSessions();
-  if (data && data.status === "success" && Array.isArray(data.sessions)) {
-    renderSessions(data.sessions);
-  } else {
-    renderSessions([]);
+  const next = data && data.status === "success" && Array.isArray(data.sessions) ? data.sessions : [];
+  if (state.sessionEditingRunId) {
+    state.sessionsCache = next;
+    return;
   }
+  renderSessions(next);
 }
 
 export async function ensureFirstSession() {

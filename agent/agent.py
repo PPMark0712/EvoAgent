@@ -20,7 +20,10 @@ from .saver import MessageSaver
 from .utils import (
     AgentConfig,
     AgentState,
+    DEFAULT_MODEL,
+    MODEL_PRESETS,
     get_input_provider,
+    load_dotenv_once,
     serialize_agent_state,
 )
 
@@ -34,6 +37,7 @@ class Agent:
         self.system_message: SystemMessage | None = None
 
     def initialize(self, args):
+        load_dotenv_once()
         output_path = args.output_path
         load_path = args.load_path
         if not load_path and args.web:
@@ -53,12 +57,9 @@ class Agent:
                 try:
                     with open(meta_path, "r", encoding="utf-8") as fp:
                         meta = json.load(fp)
-                    ts = meta.get("last_used_at")
-                    if isinstance(ts, int):
-                        score = float(ts)
-                    else:
-                        score = os.path.getmtime(meta_path)
+                    score = float(meta["last_used_at"])
                 except Exception:
+                    logging.warning(f"Invalid metadata.json, skipped: {meta_path}")
                     continue
                 if score > best_ts:
                     best_ts = score
@@ -74,41 +75,28 @@ class Agent:
             else:
                 run_name = ts
             run_dir = os.path.join(output_path, run_name)
-        os.makedirs(run_dir, exist_ok=True)
         metadata_path = os.path.join(run_dir, "metadata.json")
         working_dir = os.path.join(run_dir, "working")
         logging_dir = os.path.join(run_dir, "logging")
         checkpoint_dir = os.path.join(run_dir, "checkpoint")
         memory_dir = args.memory_dir if os.path.isabs(args.memory_dir) else os.path.abspath(args.memory_dir)
 
+        loaded_meta = None
         if load_path:
             if not os.path.isdir(run_dir):
                 raise RuntimeError(f"Load path {run_dir} does not exist or is not a directory")
             for d in (working_dir, logging_dir, checkpoint_dir):
                 if not os.path.isdir(d):
                     raise RuntimeError(f"Expected directory missing under load path: {d}")
-            try:
-                with open(metadata_path, "r", encoding="utf-8") as fp:
-                    resume_run_id = json.load(fp)["run_id"]
-            except Exception:
-                resume_run_id = None
-
-            if not resume_run_id:
-                db_path = os.path.join(checkpoint_dir, "graph.sqlite")
-                if os.path.isfile(db_path):
-                    try:
-                        conn = sqlite3.connect(db_path, check_same_thread=False)
-                        try:
-                            row = conn.execute("SELECT thread_id FROM checkpoints ORDER BY checkpoint_id DESC LIMIT 1").fetchone()
-                            if row and isinstance(row[0], str) and row[0].strip():
-                                resume_run_id = row[0].strip()
-                        finally:
-                            conn.close()
-                    except Exception:
-                        resume_run_id = None
+            with open(metadata_path, "r", encoding="utf-8") as fp:
+                meta = json.load(fp)
+            if not isinstance(meta, dict):
+                raise RuntimeError("Invalid metadata.json schema")
+            resume_run_id = str(meta["run_id"]).strip()
             self.resume_run_id = resume_run_id
-            if self.resume_run_id is None:
-                raise RuntimeError("Missing run_id to resume. Ensure metadata.json exists or checkpoint/graph.sqlite contains checkpoints.")
+            if not self.resume_run_id:
+                raise RuntimeError("Missing run_id to resume.")
+            loaded_meta = meta
         else:
             try:
                 os.makedirs(run_dir)
@@ -136,7 +124,7 @@ class Agent:
                 shutil.copytree(template_dir, memory_dir)
                 logging.info(f"Initialized memory dir from template: {memory_dir}")
 
-            if getattr(args, "memory_backup", False):
+            if args.memory_backup:
                 memory_backup_dir = os.path.join(run_dir, "memory_backup")
                 shutil.copytree(memory_dir, memory_backup_dir)
                 logging.info(f"Memory backup dir: {memory_backup_dir}")
@@ -155,13 +143,23 @@ class Agent:
                             continue
             self.history_message_dicts = history
 
+        model = str(args.model).strip() if args.model else str(DEFAULT_MODEL).strip()
+        if not model:
+            raise ValueError("Missing model")
+        if model not in MODEL_PRESETS:
+            raise ValueError(f"Unknown model: {model}")
+        preset = MODEL_PRESETS[model]
         config = AgentConfig(
-            api_type=args.api_type,
+            api_type=preset["api_type"],
+            api_base_env=preset["api_base_env"],
+            api_key_env=preset["api_key_env"],
             checkpoint_dir=os.path.abspath(checkpoint_dir),
             logging_dir=os.path.abspath(logging_dir),
             memory_dir=memory_dir,
-            model=args.model,
-            stream=not args.no_stream,
+            model_name=preset["model_name"],
+            model_kwargs=preset["model_kwargs"],
+            special_tokens=preset["special_tokens"],
+            stream=preset["stream"],
             working_dir=os.path.abspath(working_dir),
         )
         self.config = config
@@ -180,37 +178,55 @@ class Agent:
             max_tool_error=config.max_tool_error,
             working_dir=config.working_dir,
             memory_dir=config.memory_dir,
-            thinking_token=config.thinking_token,
+            thinking_token=str((config.special_tokens or {}).get("thinking") or "thinking"),
+            toolcall_token=str((config.special_tokens or {}).get("toolcall") or "toolcall"),
             list_memory_dir=list_memory_dir,
         )
         self.system_message = SystemMessage(content=system_prompt)
         if not load_path and args.show_system_prompt:
             self.history_message_dicts = messages_to_dict([self.system_message])
         self.graph = build_graph(config)
-        if self.resume_run_id and not load_path:
-            meta = {
-                "config": config.model_dump(),
-                "created_at": datetime.now().isoformat(),
-                "created_at_ts": int(time()),
-                "last_used_at": int(time()),
-                "last_user_send_ms": 0,
-                "run_id": self.resume_run_id,
-                "title": "",
-            }
+        if self.resume_run_id:
+            now = int(time())
+            now_ms = int(time() * 1000)
+            if load_path:
+                with open(metadata_path, "r", encoding="utf-8") as fp:
+                    loaded_meta = json.load(fp)
+                if not isinstance(loaded_meta, dict):
+                    raise RuntimeError("Invalid metadata.json schema")
+                meta_out = {
+                    "config": config.model_dump(),
+                    "run_id": str(loaded_meta["run_id"]).strip(),
+                    "model": str(loaded_meta["model"]).strip(),
+                    "created_at": str(loaded_meta["created_at"]).strip(),
+                    "created_at_ts": int(loaded_meta["created_at_ts"]),
+                    "last_used_at": now,
+                    "last_user_send_ms": int(loaded_meta["last_user_send_ms"]),
+                    "last_user_text": str(loaded_meta["last_user_text"]),
+                    "ever_activated": bool(loaded_meta["ever_activated"]),
+                    "last_clicked_at": int(loaded_meta["last_clicked_at"]),
+                    "last_resumed_at": int(loaded_meta["last_resumed_at"]),
+                    "last_interrupted_at": int(loaded_meta["last_interrupted_at"]),
+                    "title": str(loaded_meta["title"]),
+                }
+            else:
+                meta_out = {
+                    "config": config.model_dump(),
+                    "run_id": str(self.resume_run_id).strip(),
+                    "model": str(model).strip(),
+                    "created_at": datetime.now().isoformat(),
+                    "created_at_ts": now,
+                    "last_used_at": now,
+                    "last_user_send_ms": now_ms,
+                    "last_user_text": "",
+                    "ever_activated": True,
+                    "last_clicked_at": now,
+                    "last_resumed_at": 0,
+                    "last_interrupted_at": 0,
+                    "title": "",
+                }
             with open(metadata_path, "w", encoding="utf-8") as fp:
-                json.dump(meta, fp, ensure_ascii=False, indent=2)
-        elif self.resume_run_id and load_path and not os.path.isfile(metadata_path):
-            meta = {
-                "config": config.model_dump(),
-                "created_at": datetime.now().isoformat(),
-                "created_at_ts": int(time()),
-                "last_used_at": int(time()),
-                "last_user_send_ms": 0,
-                "run_id": self.resume_run_id,
-                "title": "",
-            }
-            with open(metadata_path, "w", encoding="utf-8") as fp:
-                json.dump(meta, fp, ensure_ascii=False, indent=2)
+                json.dump(meta_out, fp, ensure_ascii=False, indent=4)
         if self.resume_run_id:
             BaseNode.set_run_logging_dir(self.resume_run_id, self.config.logging_dir)
 

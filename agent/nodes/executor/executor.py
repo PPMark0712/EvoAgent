@@ -29,7 +29,8 @@ class ExecutorNode(BaseNode):
         self.working_dir = working_dir or config.working_dir
         self.tool_names = list(tool_names)
         self.tool_param_types = self._load_tool_param_types()
-        self.thinking_token = config.thinking_token
+        self.thinking_token = config.special_tokens["thinking"]
+        self.toolcall_token = config.special_tokens["toolcall"]
         if any(x in self.tool_names for x in ("web_scan", "web_execute_js")):
             try:
                 init_driver(timeout=min(self.config.tool_call_timeout * 0.8, 10))
@@ -51,11 +52,12 @@ class ExecutorNode(BaseNode):
         return tool_param_types
 
     def _extract_toolcall_xml(self, content: str) -> str:
-        thinking_token = self.config.thinking_token
-        pattern = rf"<{thinking_token}>.*?</{thinking_token}>.*?(<toolcall>.*?</toolcall>)"
+        thinking_token = self.thinking_token
+        toolcall_token = self.toolcall_token
+        pattern = rf"<{re.escape(thinking_token)}>.*?</{re.escape(thinking_token)}>.*?(<{re.escape(toolcall_token)}>.*?</{re.escape(toolcall_token)}>)"
         match = re.search(pattern, content, re.DOTALL)
         if not match:
-            raise ValueError(f"<{thinking_token}>.*?</{thinking_token}>.*?(<toolcall>.*?</toolcall>)格式匹配失败")
+            raise ValueError(f"<{thinking_token}>.*?</{thinking_token}>.*?(<{toolcall_token}>.*?</{toolcall_token}>)格式匹配失败")
         return match.group(1)
 
     def _toolcall_example(self) -> str:
@@ -64,7 +66,7 @@ class ExecutorNode(BaseNode):
         try:
             with open(fp, "r", encoding="utf-8") as f:
                 txt = f.read()
-            return txt.replace("[[thinking_token]]", self.config.thinking_token)
+            return txt.replace("[[thinking_token]]", self.thinking_token).replace("[[toolcall_token]]", self.toolcall_token)
         except Exception:
             return ""
 

@@ -60,8 +60,9 @@ def build_graph(config: AgentConfig):
                 last_message_content = json.dumps(last_message_content, ensure_ascii=False)
             except Exception:
                 last_message_content = str(last_message_content)
-        thinking_token = config.thinking_token
-        pattern = rf"^\s*<{thinking_token}>.*?</{thinking_token}>.*?<toolcall>.*?</toolcall>\s*$"
+        thinking_token = config.special_tokens["thinking"]
+        toolcall_token = config.special_tokens["toolcall"]
+        pattern = rf"\s*<{re.escape(thinking_token)}>.*?</{re.escape(thinking_token)}>.*?<{re.escape(toolcall_token)}>.*?</{re.escape(toolcall_token)}>\s*"
         if re.fullmatch(pattern, last_message_content, re.DOTALL):
             return "executor"
         return "user"

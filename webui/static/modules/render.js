@@ -327,10 +327,11 @@ export function renderToolDetails(contentEl, text) {
   contentEl.append(details);
 }
 
-export function renderParsedAssistant(contentEl, text) {
+export function renderParsedAssistant(contentEl, text, tokens) {
   contentEl.textContent = "";
   let raw = String(text || "");
-  const token = String(state.thinkingToken || "").trim();
+  const tok = tokens && typeof tokens === "object" ? tokens : null;
+  const token = String((tok && tok.thinking) || (state.specialTokens && state.specialTokens.thinking) || "").trim();
   const escaped = token ? token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") : "";
   if (token) {
     const thinkRe = new RegExp(`<${escaped}\\s*>([\\s\\S]*?)<\\/${escaped}\\s*>`, "i");
@@ -346,7 +347,9 @@ export function renderParsedAssistant(contentEl, text) {
     }
   }
 
-  const tagRe = new RegExp(`<toolcall\\b[^>]*>[\\s\\S]*?<\\/toolcall\\s*>`, "gi");
+  const toolToken = String((tok && tok.toolcall) || (state.specialTokens && state.specialTokens.toolcall) || "toolcall").trim();
+  const toolEscaped = toolToken ? toolToken.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") : "toolcall";
+  const tagRe = new RegExp(`<${toolEscaped}\\b[^>]*>[\\s\\S]*?<\\/${toolEscaped}\\s*>`, "gi");
 
   let lastIndex = 0;
   let m;
@@ -393,7 +396,7 @@ export function appendMessage(role, text, opts) {
   if (opts && opts.render === "tool") {
     renderToolDetails(content, text);
   } else if (opts && opts.parseTags) {
-    renderParsedAssistant(content, text);
+    renderParsedAssistant(content, text, opts.tokens);
   } else if (opts && opts.markdown) {
     renderMarkdown(content, text);
   } else {

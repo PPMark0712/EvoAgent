@@ -1,2 +1,2 @@
 from .agent import Agent
-from .utils import AgentConfig, APISettings
+from .utils import AgentConfig
