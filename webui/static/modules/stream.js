@@ -92,16 +92,11 @@ export function finalizeStreamingToParsed(finalText) {
 export function toolcallDominates(text, tokens) {
   const s = String(text || "");
   const tok = tokens && typeof tokens === "object" ? tokens : null;
+  const thinkingToken = String((tok && tok.thinking) || (state.specialTokens && state.specialTokens.thinking) || "thinking").trim() || "thinking";
   const toolToken = String((tok && tok.toolcall) || (state.specialTokens && state.specialTokens.toolcall) || "toolcall").trim() || "toolcall";
-  const open = `<${toolToken}>`;
-  const close = `</${toolToken}>`;
-  const start = s.indexOf(open);
-  if (start < 0) return false;
-  const end0 = s.lastIndexOf(close);
-  if (end0 < 0 || end0 < start) return false;
-  const end = end0 + close.length;
-  const g1 = s.slice(0, start);
-  const g2 = s.slice(start, end);
-  const g3 = s.slice(end);
-  return g2.length > (g1.length + g3.length) * 0.5;
+  const esc = (x) => String(x || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const thinkEsc = esc(thinkingToken);
+  const toolEsc = esc(toolToken);
+  const re = new RegExp(`^\\s*<${thinkEsc}>[\\s\\S]*?<\\/${thinkEsc}>[\\s\\S]*?<${toolEsc}>[\\s\\S]*?<\\/${toolEsc}>\\s*$`);
+  return re.test(s);
 }
