@@ -725,6 +725,66 @@ def run_web(agent_cls, args, *, host: str = "127.0.0.1", port: int = 8000):
             response.status = 500
             return {"status": "error", "error": traceback.format_exc()}
 
+    def _safe_filename(name: str) -> str:
+        base = os.path.basename(str(name or "").replace("\\", "/"))
+        base = base.strip().strip(".")
+        if not base:
+            return ""
+        out = []
+        for ch in base:
+            if ch.isalnum() or ch in {"-", "_", ".", " "}:
+                out.append(ch)
+            else:
+                out.append("_")
+        return "".join(out).strip().strip(".")
+
+    @app.post("/api/upload")
+    def api_upload():
+        rid = request.forms.get("run_id") or ""
+        rid = str(rid).strip()
+        if not rid:
+            response.status = 400
+            return {"status": "error", "error": "missing run_id"}
+        session = manager.get_or_load(str(rid))
+        if not session.run_dir or not os.path.isdir(session.run_dir):
+            response.status = 500
+            return {"status": "error", "error": "invalid session run_dir"}
+
+        uploads = []
+        try:
+            uploads.extend(request.files.getall("files") or [])
+        except Exception:
+            pass
+        try:
+            uploads.extend(request.files.getall("file") or [])
+        except Exception:
+            pass
+        if not uploads:
+            try:
+                uploads = list(request.files.values())
+            except Exception:
+                uploads = []
+        uploads = [u for u in uploads if u is not None]
+        if not uploads:
+            response.status = 400
+            return {"status": "error", "error": "missing files"}
+
+        upload_dir = os.path.join(session.run_dir, "uploads")
+        os.makedirs(upload_dir, exist_ok=True)
+
+        saved_paths: list[str] = []
+        for up in uploads:
+            fn = _safe_filename(getattr(up, "filename", "") or "")
+            if not fn:
+                fn = f"upload_{uuid.uuid4().hex}"
+            dst = os.path.join(upload_dir, fn)
+            if os.path.exists(dst):
+                root, ext = os.path.splitext(fn)
+                dst = os.path.join(upload_dir, f"{root}_{uuid.uuid4().hex}{ext}")
+            up.save(dst, overwrite=False)
+            saved_paths.append(os.path.abspath(dst))
+        return {"status": "success", "paths": saved_paths}
+
     @app.post("/api/send")
     def api_send():
         data = request.json or {}

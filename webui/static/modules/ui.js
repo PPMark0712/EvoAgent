@@ -1,6 +1,42 @@
 import { chatInnerEl, chatTitleEl, chatTitleMetaEl, chatTitleTextEl, inputEl, jumpBtn, loadingEl, newChatBtn, sendBtn, statusEl } from "./dom.js";
 import { state } from "./state.js";
 
+function insertAtCursor(el, text) {
+  const t = String(text || "");
+  if (!t) return;
+  const start = typeof el.selectionStart === "number" ? el.selectionStart : el.value.length;
+  const end = typeof el.selectionEnd === "number" ? el.selectionEnd : el.value.length;
+  const before = el.value.slice(0, start);
+  const after = el.value.slice(end);
+  el.value = before + t + after;
+  const next = before.length + t.length;
+  try {
+    el.setSelectionRange(next, next);
+  } catch {
+  }
+}
+
+async function uploadFiles(runId, files) {
+  const rid = String(runId || "").trim();
+  if (!rid) return null;
+  const list = Array.from(files || []);
+  if (!list.length) return null;
+  const fd = new FormData();
+  fd.append("run_id", rid);
+  for (const f of list) fd.append("files", f);
+  let resp;
+  try {
+    resp = await fetch("/api/upload", { method: "POST", body: fd });
+  } catch {
+    return null;
+  }
+  try {
+    return await resp.json();
+  } catch {
+    return null;
+  }
+}
+
 export function setLoading(on) {
   if (!loadingEl) return;
   if (on) loadingEl.classList.remove("hidden");
@@ -152,6 +188,33 @@ export function initUiHandlers() {
   inputEl.addEventListener("compositionend", () => {
     state.inputComposing = false;
   });
+  document.addEventListener(
+    "dragover",
+    (e) => {
+      const dt = e.dataTransfer;
+      if (!dt) return;
+      if (dt.files && dt.files.length) e.preventDefault();
+    },
+    false
+  );
+  document.addEventListener(
+    "drop",
+    async (e) => {
+      const dt = e.dataTransfer;
+      if (!dt) return;
+      if (!dt.files || !dt.files.length) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (!state.activeRunId || state.backendDown) return;
+      const res = await uploadFiles(state.activeRunId, dt.files);
+      if (!res || res.status !== "success" || !Array.isArray(res.paths) || !res.paths.length) return;
+      const ins = res.paths.map((p) => String(p)).join("\n") + "\n";
+      insertAtCursor(inputEl, ins);
+      autosize();
+      inputEl.focus();
+    },
+    false
+  );
   autosize();
 }
 
