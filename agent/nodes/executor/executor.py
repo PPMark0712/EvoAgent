@@ -52,12 +52,11 @@ class ExecutorNode(BaseNode):
         return tool_param_types
 
     def _extract_toolcall_xml(self, content: str) -> str:
-        thinking_token = self.thinking_token
         toolcall_token = self.toolcall_token
-        pattern = rf"<{re.escape(thinking_token)}>.*?</{re.escape(thinking_token)}>.*?(<{re.escape(toolcall_token)}>.*?</{re.escape(toolcall_token)}>)"
+        pattern = rf"(<{re.escape(toolcall_token)}>\s*.*?\s*</{re.escape(toolcall_token)}>)"
         match = re.search(pattern, content, re.DOTALL)
         if not match:
-            raise ValueError(f"<{thinking_token}>.*?</{thinking_token}>.*?(<{toolcall_token}>.*?</{toolcall_token}>)格式匹配失败")
+            raise ValueError(f"<{toolcall_token}>.*?</{toolcall_token}>格式匹配失败")
         return match.group(1)
 
     def _toolcall_example(self) -> str:
