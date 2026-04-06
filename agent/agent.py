@@ -35,9 +35,11 @@ class Agent:
         self.history_message_dicts: list[dict] = []
         self.resume_run_id: str | None = None
         self.system_message: SystemMessage | None = None
+        self.show_system_prompt: bool = False
 
     def initialize(self, args):
         load_dotenv_once()
+        self.show_system_prompt = bool(getattr(args, "show_system_prompt", False))
         output_path = args.output_path
         load_path = args.load_path
         if not load_path and args.web:
@@ -285,16 +287,17 @@ class Agent:
             except Exception:
                 pass
             if not resumed and self.system_message is not None:
-                event = {
-                    "run_id": run_id,
-                    "type": "messages",
-                    "data": {"message_type": "main", "messages": messages_to_dict([self.system_message])},
-                }
-                if emit_to_terminal:
-                    for emitter in emitters:
-                        emitter(event)
-                else:
-                    saver.emit(event)
+                if self.show_system_prompt:
+                    event = {
+                        "run_id": run_id,
+                        "type": "messages",
+                        "data": {"message_type": "main", "messages": messages_to_dict([self.system_message])},
+                    }
+                    if emit_to_terminal:
+                        for emitter in emitters:
+                            emitter(event)
+                    else:
+                        saver.emit(event)
             while True:
                 try:
                     for _ in self.graph.stream(input_state, config=cfg, stream_mode="values"):
