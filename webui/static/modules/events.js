@@ -1,7 +1,7 @@
 import { inputEl } from "./dom.js";
 import { state } from "./state.js";
 import { appendMessage } from "./render.js";
-import { clearStreaming, ensureStreaming, finalizeStreamingToParsed, scheduleStreamRender, toolcallDominates } from "./stream.js";
+import { clearStreaming, ensureStreaming, finalizeStreamingToParsed, restoreStreamingSnapshot, scheduleStreamRender, toolcallDominates } from "./stream.js";
 import { refreshSessions, renderSessions } from "./sessions.js";
 import { scrollToBottom, setLoading, setSendMode, setAskPending, setInputEnabled } from "./ui.js";
 
@@ -52,12 +52,16 @@ export async function onEventMessage(e) {
   if (ev.type === "llm_stream" && ev.data && ev.data.message_type === "main") {
     if (state.stopRequested) return;
     const delta = String(ev.data.delta || "");
+    const rid = String(ev.run_id || "");
+    if (!state.streamingText && !state.streamDisplayText && !state.streamQueue) {
+      restoreStreamingSnapshot(rid);
+    }
     state.streamingText += delta;
     state.streamQueue += delta;
     ensureStreaming();
     scheduleStreamRender();
     state.inFlight = true;
-    state.inFlightRunId = String(ev.run_id || "");
+    state.inFlightRunId = rid;
     if (!state.askPendingId) setSendMode("stop");
     return;
   }
@@ -138,9 +142,9 @@ export async function onEventMessage(e) {
                   return String(rawFinal);
                 }
               })();
-        finalizeStreamingToParsed(finalText);
+        finalizeStreamingToParsed(finalText, ev.run_id || "");
       } else if (interrupted) {
-        finalizeStreamingToParsed(state.streamingText);
+        finalizeStreamingToParsed(state.streamingText, ev.run_id || "");
       } else if (msgs.length) {
         clearStreaming();
       }

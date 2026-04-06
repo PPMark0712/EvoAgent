@@ -3,6 +3,7 @@ export const state = {
   sessionsCache: [],
   streamingText: "",
   streamingMsgEl: null,
+  streamSnapshots: new Map(),
   initialSystemPromptShown: false,
   askPendingId: null,
   askPendingQuestion: "",

@@ -725,19 +725,6 @@ def run_web(agent_cls, args, *, host: str = "127.0.0.1", port: int = 8000):
             response.status = 500
             return {"status": "error", "error": traceback.format_exc()}
 
-    def _safe_filename(name: str) -> str:
-        base = os.path.basename(str(name or "").replace("\\", "/"))
-        base = base.strip().strip(".")
-        if not base:
-            return ""
-        out = []
-        for ch in base:
-            if ch.isalnum() or ch in {"-", "_", ".", " "}:
-                out.append(ch)
-            else:
-                out.append("_")
-        return "".join(out).strip().strip(".")
-
     @app.post("/api/upload")
     def api_upload():
         rid = request.forms.get("run_id") or ""
@@ -772,18 +759,58 @@ def run_web(agent_cls, args, *, host: str = "127.0.0.1", port: int = 8000):
         upload_dir = os.path.join(session.run_dir, "uploads")
         os.makedirs(upload_dir, exist_ok=True)
 
+        def _norm_rel_path(s: str) -> str:
+            rel = str(s or "").replace("\\", "/").strip()
+            if not rel:
+                return ""
+            if rel.startswith("//"):
+                rel = rel.lstrip("/")
+            if len(rel) >= 3 and rel[1] == ":" and rel[2] == "/":
+                rel = rel[3:]
+            rel = rel.lstrip("/")
+            rel = os.path.normpath(rel)
+            rel = rel.replace("\\", "/")
+            if rel in {".", ""}:
+                return ""
+            if rel == ".." or rel.startswith("../") or rel.startswith("..\\"):
+                return ""
+            if os.path.isabs(rel):
+                return ""
+            return rel
+
+        rel_paths: list[str] = []
+        try:
+            rel_paths = [str(x) for x in (request.forms.getall("rel_paths") or [])]
+        except Exception:
+            rel_paths = []
+
+        use_rel = bool(rel_paths) and len(rel_paths) == len(uploads)
+        drop_root = os.path.join(upload_dir, f"drop_{uuid.uuid4().hex}") if use_rel else ""
+        if drop_root:
+            os.makedirs(drop_root, exist_ok=True)
+
         saved_paths: list[str] = []
-        for up in uploads:
-            fn = _safe_filename(getattr(up, "filename", "") or "")
+        for idx, up in enumerate(uploads):
+            raw_name = str(getattr(up, "filename", "") or "")
+            fn = os.path.basename(raw_name.replace("\\", "/")).strip().strip(".")
             if not fn:
                 fn = f"upload_{uuid.uuid4().hex}"
-            dst = os.path.join(upload_dir, fn)
-            if os.path.exists(dst):
-                root, ext = os.path.splitext(fn)
-                dst = os.path.join(upload_dir, f"{root}_{uuid.uuid4().hex}{ext}")
+            if use_rel:
+                rel = _norm_rel_path(rel_paths[idx])
+                rel = rel if rel else fn
+                dst = os.path.join(drop_root, rel)
+                os.makedirs(os.path.dirname(dst), exist_ok=True)
+            else:
+                dst = os.path.join(upload_dir, fn)
+                if os.path.exists(dst):
+                    root, ext = os.path.splitext(fn)
+                    dst = os.path.join(upload_dir, f"{root}_{uuid.uuid4().hex}{ext}")
             up.save(dst, overwrite=False)
             saved_paths.append(os.path.abspath(dst))
-        return {"status": "success", "paths": saved_paths}
+        out = {"status": "success", "paths": saved_paths}
+        if drop_root:
+            out["root"] = os.path.abspath(drop_root)
+        return out
 
     @app.post("/api/send")
     def api_send():

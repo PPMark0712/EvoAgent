@@ -1,7 +1,7 @@
 import { inputEl, sessionsEl, newChatBtn, modelSelectEl } from "./dom.js";
 import { state } from "./state.js";
 import { fetchSessions, postJson } from "./api.js";
-import { clearStreaming } from "./stream.js";
+import { clearStreaming, saveStreamingSnapshot } from "./stream.js";
 import { setAskPending, setBackendDown, setChatTitle, setChatTitleMeta, setInputEnabled, setLoading, setSendMode, setStatus, updateJump } from "./ui.js";
 
 let onEventMessage = null;
@@ -510,6 +510,8 @@ export function switchSession(runId) {
   const rid = String(runId || "").trim();
   if (!rid) return;
   if (rid === state.activeRunId) return;
+  const prev = String(state.activeRunId || "");
+  if (prev) saveStreamingSnapshot(prev);
   state.activeRunId = rid;
   if (state.loadingRunIds instanceof Set) state.loadingRunIds.add(rid);
   _ensureLoadingPoll();
@@ -524,6 +526,8 @@ export function switchSession(runId) {
 export function reloadSession(runId) {
   const rid = String(runId || "").trim();
   if (!rid) return;
+  const prev = String(state.activeRunId || "");
+  if (prev) saveStreamingSnapshot(prev);
   if (rid !== state.activeRunId) state.activeRunId = rid;
   if (state.loadingRunIds instanceof Set) state.loadingRunIds.add(rid);
   _ensureLoadingPoll();

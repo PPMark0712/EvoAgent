@@ -58,6 +58,46 @@ export function ensureStreaming() {
   return m;
 }
 
+export function saveStreamingSnapshot(runId) {
+  const rid = String(runId || "").trim();
+  if (!rid) return;
+  if (!(state.streamSnapshots instanceof Map)) state.streamSnapshots = new Map();
+  const hasAny = Boolean(state.streamingText || state.streamDisplayText || state.streamQueue);
+  if (!hasAny) {
+    state.streamSnapshots.delete(rid);
+    return;
+  }
+  const inflight = Boolean(state.inFlight && String(state.inFlightRunId || "") === rid);
+  state.streamSnapshots.set(rid, {
+    streamingText: String(state.streamingText || ""),
+    streamDisplayText: String(state.streamDisplayText || ""),
+    streamQueue: String(state.streamQueue || ""),
+    inflight,
+  });
+}
+
+export function restoreStreamingSnapshot(runId) {
+  const rid = String(runId || "").trim();
+  if (!rid) return false;
+  if (!(state.streamSnapshots instanceof Map)) return false;
+  const snap = state.streamSnapshots.get(rid);
+  if (!snap) return false;
+  state.streamingText = String(snap.streamingText || "");
+  state.streamDisplayText = String(snap.streamDisplayText || "");
+  state.streamQueue = String(snap.streamQueue || "");
+  ensureStreaming();
+  renderStreamingPlain(state.streamingMsgEl.content, state.streamDisplayText);
+  if (state.streamQueue) scheduleStreamRender();
+  return true;
+}
+
+export function deleteStreamingSnapshot(runId) {
+  const rid = String(runId || "").trim();
+  if (!rid) return;
+  if (!(state.streamSnapshots instanceof Map)) return;
+  state.streamSnapshots.delete(rid);
+}
+
 export function clearStreaming() {
   state.streamingText = "";
   state.streamDisplayText = "";
@@ -69,7 +109,7 @@ export function clearStreaming() {
   state.streamingMsgEl = null;
 }
 
-export function finalizeStreamingToParsed(finalText) {
+export function finalizeStreamingToParsed(finalText, runId) {
   if (!state.streamingMsgEl) return false;
   const typingEl = state.streamingMsgEl.meta.querySelector(".typing");
   if (typingEl) {
@@ -86,6 +126,7 @@ export function finalizeStreamingToParsed(finalText) {
   state.streamRafId = 0;
   state.streamPending = false;
   state.streamingMsgEl = null;
+  deleteStreamingSnapshot(runId);
   return true;
 }
 
@@ -97,6 +138,8 @@ export function toolcallDominates(text, tokens) {
   const esc = (x) => String(x || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const thinkEsc = esc(thinkingToken);
   const toolEsc = esc(toolToken);
-  const re = new RegExp(`^\\s*<${thinkEsc}>[\\s\\S]*?<\\/${thinkEsc}>[\\s\\S]*?<${toolEsc}>[\\s\\S]*?<\\/${toolEsc}>\\s*$`);
-  return re.test(s);
+  const thinkToolcallRe = new RegExp(`^\\s*<${thinkEsc}>[\\s\\S]*?<\\/${thinkEsc}>[\\s\\S]*?<${toolEsc}>[\\s\\S]*?<\\/${toolEsc}>\\s*$`);
+  if (thinkToolcallRe.test(s)) return true;
+  const toolcallOnlyRe = new RegExp(`^\\s*<${toolEsc}>[\\s\\S]*?<\\/${toolEsc}>\\s*$`);
+  return toolcallOnlyRe.test(s);
 }
