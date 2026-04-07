@@ -215,8 +215,8 @@ class ExecutorNode(BaseNode):
     def _format_tool_results(self, tool_results: dict) -> str:
         def _redact_sensitive(text: str) -> str:
             s = str(text)
-            s = re.sub(r"\b(sk-[A-Za-z0-9]{8,})\b", "sk-abc123", s)
-            s = re.sub(r"\b(Bearer)\s+([A-Za-z0-9_\-\.=]{8,})\b", "Bearer abc123", s)
+            s = re.sub(r"\bsk-[A-Za-z0-9_-]{8,}\b", "sk-xxx(masked)", s)
+            s = re.sub(r"\bBearer\s+[A-Za-z0-9_\-\.=]{8,}\b", "Bearer abc123(masked)", s)
             return s
 
         formatted_results = "<tool_results>\n"
