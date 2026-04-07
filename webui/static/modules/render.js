@@ -114,6 +114,11 @@ export function renderMarkdown(contentEl, text) {
   let fenceLang = "";
   let fenceLines = [];
 
+  const indentLen = (ln) => {
+    const m = String(ln || "").match(/^\s*/);
+    return m ? m[0].length : 0;
+  };
+
   const isTableSepLine = (ln) => {
     const s = String(ln || "");
     return /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(s);
@@ -144,6 +149,60 @@ export function renderMarkdown(contentEl, text) {
       renderInline(p, line);
     }
     frag.append(p);
+  };
+
+  const parseNestedList = (baseIndent) => {
+    if (i >= lines.length) return null;
+
+    let next = lines[i] ?? "";
+    if (!next.trim()) {
+      const maybe = lines[i + 1] ?? "";
+      const maybeIndent = indentLen(maybe);
+      if (maybeIndent <= baseIndent + 1) return null;
+      if (!/^\s*([-*+]|\d+\.)\s+/.test(maybe)) return null;
+      i += 1;
+      next = lines[i] ?? "";
+    }
+
+    const nextIndent = indentLen(next);
+    if (nextIndent <= baseIndent + 1) return null;
+
+    const ulRe = new RegExp(`^\\s{${baseIndent + 2},}[-*+]\\s+(.*)$`);
+    const olRe = new RegExp(`^\\s{${baseIndent + 2},}\\d+\\.\\s+(.*)$`);
+
+    const ulM = next.match(ulRe);
+    if (ulM) {
+      const ul = document.createElement("ul");
+      while (i < lines.length) {
+        const m = (lines[i] ?? "").match(ulRe);
+        if (!m) break;
+        const li = document.createElement("li");
+        renderInline(li, m[1] || "");
+        i += 1;
+        const nested = parseNestedList(indentLen(lines[i - 1] ?? ""));
+        if (nested) li.append(nested);
+        ul.append(li);
+      }
+      return ul;
+    }
+
+    const olM = next.match(olRe);
+    if (olM) {
+      const ol = document.createElement("ol");
+      while (i < lines.length) {
+        const m = (lines[i] ?? "").match(olRe);
+        if (!m) break;
+        const li = document.createElement("li");
+        renderInline(li, m[1] || "");
+        i += 1;
+        const nested = parseNestedList(indentLen(lines[i - 1] ?? ""));
+        if (nested) li.append(nested);
+        ol.append(li);
+      }
+      return ol;
+    }
+
+    return null;
   };
 
   while (i < lines.length) {
@@ -215,10 +274,13 @@ export function renderMarkdown(contentEl, text) {
       while (i < lines.length) {
         const m = (lines[i] ?? "").match(/^\s*[-*+]\s+(.*)$/);
         if (!m) break;
+        const baseIndent = indentLen(lines[i] ?? "");
         const li = document.createElement("li");
         renderInline(li, m[1] || "");
-        ul.append(li);
         i += 1;
+        const nested = parseNestedList(baseIndent);
+        if (nested) li.append(nested);
+        ul.append(li);
       }
       frag.append(ul);
       continue;
@@ -230,10 +292,13 @@ export function renderMarkdown(contentEl, text) {
       while (i < lines.length) {
         const m = (lines[i] ?? "").match(/^\s*\d+\.\s+(.*)$/);
         if (!m) break;
+        const baseIndent = indentLen(lines[i] ?? "");
         const li = document.createElement("li");
         renderInline(li, m[1] || "");
-        ol.append(li);
         i += 1;
+        const nested = parseNestedList(baseIndent);
+        if (nested) li.append(nested);
+        ol.append(li);
       }
       frag.append(ol);
       continue;

@@ -636,25 +636,20 @@ def run_web(agent_cls, args, *, host: str = "127.0.0.1", port: int = 8000):
     def api_model_presets():
         response.content_type = "application/json; charset=utf-8"
         presets_out: list[dict] = []
-        if isinstance(model_presets, dict):
-            for m in sorted(model_presets.keys()):
-                v = model_presets.get(m)
-                if not isinstance(v, dict):
-                    continue
-                presets_out.append(
-                    {
-                        "model": m,
-                        "label": str(v.get("label") or m),
-                        "api_type": v.get("api_type"),
-                        "model_name": v.get("model_name"),
-                        "special_tokens": v.get("special_tokens")
-                        if isinstance(v.get("special_tokens"), dict)
-                        else {
-                            "thinking": v.get("thinking_token") or "thinking",
-                            "toolcall": v.get("toolcall_token") or "toolcall",
-                        },
-                    }
-                )
+        for m in sorted(model_presets.keys()):
+            v = model_presets[m]
+            label = str(v["label"]).strip() if "label" in v and v["label"] is not None else ""
+            if not label:
+                label = str(m)
+            presets_out.append(
+                {
+                    "model": m,
+                    "label": label,
+                    "api_type": v["api_type"],
+                    "model_name": v["model_name"],
+                    "special_tokens": v["special_tokens"],
+                }
+            )
         return json.dumps({"status": "success", "default": default_model, "models": presets_out}, ensure_ascii=False)
 
     @app.post("/api/sessions/new")
