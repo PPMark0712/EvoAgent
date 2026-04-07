@@ -213,12 +213,18 @@ class ExecutorNode(BaseNode):
                     self.logger.error(f"Failed to change directory back to {prev_cwd}")
 
     def _format_tool_results(self, tool_results: dict) -> str:
+        def _redact_sensitive(text: str) -> str:
+            s = str(text)
+            s = re.sub(r"\b(sk-[A-Za-z0-9]{8,})\b", "sk-abc123", s)
+            s = re.sub(r"\b(Bearer)\s+([A-Za-z0-9_\-\.=]{8,})\b", "Bearer abc123", s)
+            return s
+
         formatted_results = "<tool_results>\n"
         for tool_result in tool_results:
             name = tool_result["name"]
             status = tool_result["status"]
             result_str = tool_result["result"] if status == "success" else tool_result["error"]
-            result_str = str(result_str)
+            result_str = _redact_sensitive(str(result_str))
             max_chars = self.config.tool_result_max_chars
             if max_chars > 0 and len(result_str) > max_chars:
                 result_str = result_str[:max_chars] + "...[Truncated]"
@@ -231,32 +237,35 @@ class ExecutorNode(BaseNode):
         self.check_interrupt()
         last_message = state["messages"][-1]
         continuous_tool_error = state["continuous_tool_error"]
-        force_ask_user = continuous_tool_error >= self.config.max_tool_error and "ask_user" in self.tool_names
 
         try:
             tool_calls = self._parse_tool_call(last_message.content)
         except Exception as e:
-            if force_ask_user:
-                tool_calls = [{"name": "ask_user", "arguments": {"question": ""}}]
-            else:
-                continuous_tool_error += 1
-                example = self._toolcall_example()
-                content = f"工具调用解析错误, {type(e).__name__}: {str(e)}"
-                if example:
-                    content += f"\n\n请严格按以下示例格式输出：\n{example}"
-                if continuous_tool_error >= self.config.max_tool_error:
-                    content += f"\n连续{self.config.max_tool_error}次错误调用，请调用ask_user工具以询问解决方法"
-                response = HumanMessage(content=content, additional_kwargs={"source": "tool"})
-                self.emit_messages([response], "main")
-                state_update = {
-                    "continuous_tool_error": continuous_tool_error,
-                    "messages": [response],
-                }
-                return state_update
+            continuous_tool_error += 1
+            example = self._toolcall_example()
+            content = f"工具调用解析错误, {type(e).__name__}: {str(e)}"
+            if example:
+                content += f"\n请严格按以下示例格式输出：\n{example}"
+            if continuous_tool_error >= self.config.max_tool_error:
+                content += f"\n连续{self.config.max_tool_error}次工具调用错误，下轮必须回复用户。"
 
-        if force_ask_user:
-            if not any(tc.get("name") == "ask_user" for tc in tool_calls):
-                tool_calls = [{"name": "ask_user", "arguments": {"question": ""}}]
+            new_tool_iters = state["tool_iters"] + 1
+            max_tool_iters = self.config.max_tool_iters
+            if max_tool_iters > 0:
+                remaining = max_tool_iters - new_tool_iters
+                if 1 <= remaining <= 3:
+                    content += f"\ntoolcall轮次已接近上限，还剩{remaining}次，就必须回复用户。"
+                elif remaining == 0:
+                    content += "\ntoolcall轮次已达上限，下轮必须回复用户。"
+
+            response = HumanMessage(content=content, additional_kwargs={"source": "tool"})
+            self.emit_messages([response], "main")
+            state_update = {
+                "continuous_tool_error": continuous_tool_error,
+                "messages": [response],
+                "tool_iters": new_tool_iters,
+            }
+            return state_update
 
         tool_results = []
         next_task_status = None
@@ -283,17 +292,26 @@ class ExecutorNode(BaseNode):
         response_content = self._format_tool_results(tool_results)
         is_error = any(tool_result["status"] in ("error", "failed") for tool_result in tool_results)
         if is_error and continuous_tool_error + 1 == self.config.max_tool_error:
-            response_content += f"\n连续{self.config.max_tool_error}次错误调用，请调用ask_user工具以询问解决方法"
+            response_content += f"\n连续{self.config.max_tool_error}次工具调用错误，将返回用户输入以继续。"
         if next_task_status is not None:
             response_content += "\n<task_status>\n" + json.dumps(next_task_status, ensure_ascii=False) + "\n</task_status>"
 
+        new_tool_iters = state["tool_iters"] + 1
+        max_tool_iters = self.config.max_tool_iters
+        if max_tool_iters > 0:
+            remaining = max_tool_iters - new_tool_iters
+            if 1 <= remaining <= 3:
+                response_content += f"\n哈，toolcall轮次已接近上限，还剩{remaining}次，就必须回复用户。"
+            elif remaining == 0:
+                response_content += "\n哈，toolcall轮次已达上限，下轮必须回复用户。"
+
         response = HumanMessage(content=response_content, additional_kwargs={"source": "tool"})
         self.emit_messages([response], "main")
-        next_continuous_tool_error = 0 if force_ask_user else (continuous_tool_error + 1 if is_error else 0)
+        next_continuous_tool_error = continuous_tool_error + 1 if is_error else 0
         state_update = {
             "continuous_tool_error": next_continuous_tool_error,
             "messages": [response],
-            "tool_iters": state["tool_iters"] + len(tool_calls),
+            "tool_iters": new_tool_iters,
         }
         if next_task_status is not None:
             state_update["task_status"] = next_task_status

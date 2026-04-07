@@ -54,6 +54,10 @@ def build_graph(config: AgentConfig):
     def _decide_after_worker(state: AgentState):
         if state["interrupted"]:
             return "user"
+        if config.max_tool_iters > 0 and state["tool_iters"] >= config.max_tool_iters:
+            return "user"
+        if state["continuous_tool_error"] >= config.max_tool_error:
+            return "user"
         last_message_content = state["messages"][-1].content
         if not isinstance(last_message_content, str):
             try:

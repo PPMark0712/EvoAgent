@@ -1,11 +1,10 @@
 import os
-from typing import Any, Type
 
 from langchain_anthropic import ChatAnthropic
-from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_openai import ChatOpenAI
 
 from ..utils.dotenv import load_dotenv_once
+from .responses_model import ChatResponsesModel
 from .retry import RetryLLM
 
 
@@ -19,7 +18,7 @@ def create_chat_model(
     retry_max_retries: int = 10,
     retry_delay: float = 5.0,
     **kwargs,
-) -> Any:
+):
     load_dotenv_once()
     if stream is not None and "streaming" not in kwargs:
         kwargs["streaming"] = stream
@@ -27,6 +26,8 @@ def create_chat_model(
         model_cls = ChatAnthropic
     elif api_type == "openai":
         model_cls = ChatOpenAI
+    elif api_type in ("responses", "openai_responses"):
+        model_cls = ChatResponsesModel
     else:
         raise ValueError(f"Unsupported api_type: {api_type}")
     if not api_key_env or not str(api_key_env).strip():
@@ -51,6 +52,13 @@ def create_chat_model(
             model=model_name,
             openai_api_key=api_key,
             openai_api_base=api_base,
+            **kwargs,
+        )
+    elif model_cls is ChatResponsesModel:
+        llm = ChatResponsesModel(
+            model=model_name,
+            api_key=api_key,
+            api_base=api_base,
             **kwargs,
         )
     else:

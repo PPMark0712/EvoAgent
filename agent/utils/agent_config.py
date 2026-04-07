@@ -21,7 +21,7 @@ class AgentConfig(BaseModel):
         ]
     )
     logging_dir: str
-    max_iters: int = 30
+    max_tool_iters: int = 30
     max_messages: int = 100
     max_tool_error: int = 8
     memory_dir: str

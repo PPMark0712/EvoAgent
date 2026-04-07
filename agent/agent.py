@@ -151,19 +151,37 @@ class Agent:
         if model not in MODEL_PRESETS:
             raise ValueError(f"Unknown model: {model}")
         preset = MODEL_PRESETS[model]
-        config = AgentConfig(
-            api_type=preset["api_type"],
-            api_base_env=preset["api_base_env"],
-            api_key_env=preset["api_key_env"],
-            checkpoint_dir=os.path.abspath(checkpoint_dir),
-            logging_dir=os.path.abspath(logging_dir),
-            memory_dir=memory_dir,
-            model_name=preset["model_name"],
-            model_kwargs=preset["model_kwargs"],
-            special_tokens=preset["special_tokens"],
-            stream=preset["stream"],
-            working_dir=os.path.abspath(working_dir),
-        )
+        def _deep_merge_dict(base: dict, override: dict) -> dict:
+            out = dict(base)
+            for k, v in override.items():
+                if k in out and isinstance(out[k], dict) and isinstance(v, dict):
+                    out[k] = _deep_merge_dict(out[k], v)
+                else:
+                    out[k] = v
+            return out
+
+        config_data: dict[str, Any] = {
+            "api_type": preset["api_type"],
+            "api_base_env": preset["api_base_env"],
+            "api_key_env": preset["api_key_env"],
+            "checkpoint_dir": os.path.abspath(checkpoint_dir),
+            "logging_dir": os.path.abspath(logging_dir),
+            "memory_dir": memory_dir,
+            "model_name": preset["model_name"],
+            "model_kwargs": preset["model_kwargs"],
+            "special_tokens": preset["special_tokens"],
+            "stream": preset["stream"],
+            "working_dir": os.path.abspath(working_dir),
+        }
+        for field in AgentConfig.model_fields:
+            if field in preset:
+                v = preset[field]
+                if field in config_data and isinstance(config_data[field], dict) and isinstance(v, dict):
+                    config_data[field] = _deep_merge_dict(config_data[field], v)
+                else:
+                    config_data[field] = v
+
+        config = AgentConfig(**config_data)
         self.config = config
         tool_names = list(config.enabled_tools)
         list_memory_dir = ""
