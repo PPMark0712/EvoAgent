@@ -24,7 +24,6 @@ from .utils import (
     MODEL_PRESETS,
     get_input_provider,
     load_dotenv_once,
-    serialize_agent_state,
 )
 
 
@@ -268,7 +267,6 @@ class Agent:
             task_status=[],
             tool_iters=0,
             user_iters=0,
-            worker_iters=0,
         )
         run_id = run_id or uuid.uuid4().hex
         BaseNode.set_run_id(run_id)
@@ -319,9 +317,7 @@ class Agent:
             while True:
                 try:
                     for _ in self.graph.stream(input_state, config=cfg, stream_mode="values"):
-                        input_state = None
-                    final_state = self.graph.get_state(cfg).values
-                    return serialize_agent_state(final_state)
+                        pass
                 except Interrupted:
                     BaseNode.clear_interrupt(run_id)
                     node_key = current_node["value"]
@@ -338,7 +334,6 @@ class Agent:
                         "continuous_tool_error": 0,
                         "interrupted": True,
                         "tool_iters": 0,
-                        "worker_iters": 0,
                     }
                     cfg = self.graph.update_state(cfg, update_values, as_node="worker")
                     input_state = None

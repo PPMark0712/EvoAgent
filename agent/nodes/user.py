@@ -20,6 +20,5 @@ class UserNode(BaseNode):
             "messages": [message],
             "tool_iters": 0,
             "user_iters": state["user_iters"] + 1,
-            "worker_iters": 0,
         }
         return state_update

@@ -95,6 +95,5 @@ class WorkerNode(BaseNode):
         state_update = {
             "last_worker_usage": usage_metadata,
             "messages": [response],
-            "worker_iters": state["worker_iters"] + 1,
         }
         return state_update

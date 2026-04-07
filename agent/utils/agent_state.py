@@ -1,7 +1,6 @@
 from typing import Annotated, Any, Dict, List, TypedDict
 
 from langchain_core.messages import BaseMessage
-from langchain_core.messages import messages_to_dict
 
 
 def _merge_messages(left: List[BaseMessage], right: List[BaseMessage]) -> List[BaseMessage]:
@@ -30,18 +29,3 @@ class AgentState(TypedDict):
     task_status: List[Dict[str, Any]] = []
     tool_iters: int = 0
     user_iters: int = 0
-    worker_iters: int = 0
-
-
-def serialize_agent_state(state: AgentState) -> dict:
-    serializable_state = {
-        "continuous_tool_error": state["continuous_tool_error"],
-        "interrupted": state["interrupted"],
-        "last_worker_usage": state["last_worker_usage"],
-        "messages": messages_to_dict(state["messages"]),
-        "task_status": state["task_status"],
-        "tool_iters": state["tool_iters"],
-        "user_iters": state["user_iters"],
-        "worker_iters": state["worker_iters"],
-    }
-    return serializable_state
