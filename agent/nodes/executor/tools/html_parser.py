@@ -7,9 +7,6 @@ from bs4.element import Comment, NavigableString, Tag
 
 class HtmlParser:
     def __init__(self):
-        self.regex_replacements: list[tuple[re.Pattern, str]] = [
-            (re.compile(r"\n{3,}"), "\n\n"),
-        ]
         self.drop_tags = {
             "script",
             "style",
@@ -228,8 +225,7 @@ class HtmlParser:
         if not isinstance(text, str):
             text = str(text)
         text = text.replace(self.space_token, " ")
-        for pattern, repl in self.regex_replacements:
-            text = pattern.sub(repl, text)
+        text = text.replace("\r\n", "\n").replace("\r", "\n")
 
         lines = text.splitlines()
         out: list[str] = []
@@ -254,18 +250,14 @@ class HtmlParser:
         text = "\n".join(out)
 
         text = text.replace("\u00a0", " ")
+        text = re.sub(r"(?:[ \t]*\n[ \t]*)+", "\n", text)
         text = re.sub(r"[ \t]+", " ", text)
-        lines = [ln.strip() for ln in text.splitlines()]
-        out = []
-        for ln in lines:
-            if not ln:
-                if out and out[-1] != "":
-                    out.append("")
-                continue
-            out.append(ln)
-        while out and out[-1] == "":
-            out.pop()
-        return "\n".join(out)
+        lines = [ln.strip() for ln in text.split("\n")]
+        while lines and lines[0] == "":
+            lines.pop(0)
+        while lines and lines[-1] == "":
+            lines.pop()
+        return "\n".join(lines)
 
     def _replace_brs(self, x: Any) -> Any:
         soup = x

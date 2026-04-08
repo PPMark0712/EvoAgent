@@ -172,13 +172,19 @@ class TampermonkeyDriver:
         def link():
             data = _read_json_body()
             if data.get("cmd") == "get_all_sessions":
-                return json.dumps({"r": self.get_all_sessions()}, ensure_ascii=False)
+                try:
+                    return json.dumps({"r": self.get_all_sessions()}, ensure_ascii=False)
+                except Exception as e:
+                    return json.dumps({"r": {"error": str(e)}}, ensure_ascii=False)
             if data.get("cmd") == "execute_js":
                 session_id = data.get("sessionId")
                 code = data.get("code")
                 timeout = float(data.get("timeout", 10.0))
-                result = self.execute_js(code, timeout=timeout, session_id=session_id)
-                return json.dumps({"r": result}, ensure_ascii=False)
+                try:
+                    result = self.execute_js(code, timeout=timeout, session_id=session_id)
+                    return json.dumps({"r": result}, ensure_ascii=False)
+                except Exception as e:
+                    return json.dumps({"r": {"error": str(e)}}, ensure_ascii=False)
             return "ok"
 
         def run():
@@ -328,9 +334,7 @@ class TampermonkeyDriver:
                     acked = True
                 now = time.time()
                 if not acked and time.time() > ack_deadline:
-                    last_timeout_result = (
-                        {"result": f"Session {candidate_id} no ACK (script may not have been delivered)"}
-                    )
+                    last_timeout_result = {"result": f"Session {candidate_id} no ACK (script may not have been delivered)"}
                     break
                 if tp == "ws":
                     if not session.is_active():
@@ -361,7 +365,25 @@ class TampermonkeyDriver:
             result = self.results.pop(exec_id)
             self.acks.pop(exec_id, None)
             if not result["success"]:
-                raise Exception(result["data"])
+                err = result.get("data")
+                if isinstance(err, dict):
+                    parts: list[str] = []
+                    name = err.get("name")
+                    source = err.get("source")
+                    message = err.get("message")
+                    stack = err.get("stack")
+                    if name:
+                        parts.append(f"name: {name}")
+                    if source:
+                        parts.append(f"source: {source}")
+                    if message:
+                        parts.append(f"message:\n{str(message).rstrip()}")
+                    if stack:
+                        parts.append(f"stack:\n{str(stack).rstrip()}")
+                    if not parts:
+                        parts.append(json.dumps(err, ensure_ascii=False, indent=2))
+                    raise Exception("\n".join(parts))
+                raise Exception(str(err))
 
             rr = {"data": result["data"]}
             after_sids = self.get_session_dict()
@@ -382,11 +404,21 @@ class TampermonkeyDriver:
         raise ValueError(f"Session {session_id} is not connected")
 
     def _remote_cmd(self, cmd: dict) -> dict:
-        return requests.post(self.remote, headers={"Content-Type": "application/json"}, json=cmd).json()
+        resp = requests.post(self.remote, headers={"Content-Type": "application/json"}, json=cmd)
+        try:
+            return resp.json()
+        except Exception:
+            text = resp.text or ""
+            raise Exception(f"Remote driver returned non-JSON response: HTTP {resp.status_code}\n{text[:2000]}")
 
     def get_all_sessions(self) -> list[dict]:
         if self.is_remote:
-            return self._remote_cmd({"cmd": "get_all_sessions"}).get("r", [])
+            r = self._remote_cmd({"cmd": "get_all_sessions"}).get("r")
+            if isinstance(r, dict) and r.get("error"):
+                raise Exception(str(r.get("error")))
+            if isinstance(r, list):
+                return r
+            return []
         return [{"id": session.id, **session.info} for session in self.sessions.values() if session.is_active()]
 
     def get_session_dict(self) -> dict[str, str]:

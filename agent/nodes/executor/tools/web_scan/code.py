@@ -1,21 +1,8 @@
-import json
 import os
 
 from ..html_parser import HtmlParser
 from ..TampermonkeyDriver import TampermonkeyDriver, get_driver
-
-
-def _to_xml(data) -> str:
-    result = ""
-    if isinstance(data, dict):
-        for k, v in data.items():
-            result += f"<{k}>\n{_to_xml(v)}\n</{k}>\n"
-    elif isinstance(data, list):
-        for v in data:
-            result += f"<item>\n{_to_xml(v)}\n</item>\n"
-    else:
-        result = str(data)
-    return result.rstrip()
+from ..web_execute_js.code import format_tabs_info, xml_wrap
 
 
 _HTML_PARSER = HtmlParser()
@@ -28,30 +15,8 @@ def _read_js(rel_path: str) -> str:
         return f.read()
 
 
-def _get_tabs(driver: TampermonkeyDriver) -> list[dict]:
-    tabs = []
-    for sess in driver.get_all_sessions():
-        sess.pop("connected_at", None)
-        sess.pop("type", None)
-        url = sess.get("url", "")
-        sess["url"] = url[:50] + ("..." if len(url) > 50 else "")
-        tabs.append(sess)
-    return tabs
-
-
 def _get_html(driver: TampermonkeyDriver, *, session_id: str | None) -> str:
     js = _read_js("js/get_full_html.js")
-    resp = driver.execute_js(js, session_id=session_id)
-    if isinstance(resp, dict):
-        if "data" in resp:
-            return resp["data"]
-        if "result" in resp:
-            raise RuntimeError(resp["result"])
-    return str(resp or "")
-
-
-def _get_simplified_html_js(driver: TampermonkeyDriver, *, session_id: str | None) -> str:
-    js = _read_js("js/get_simplified_html.js")
     resp = driver.execute_js(js, session_id=session_id)
     if isinstance(resp, dict):
         if "data" in resp:
@@ -97,22 +62,26 @@ def web_scan(switch_tab_id: str | None = None, mode: str = "simplified_html", ma
     """
     try:
         driver: TampermonkeyDriver = get_driver()
-        if len(driver.get_all_sessions()) == 0:
+        try:
+            if len(driver.get_all_sessions()) == 0:
+                return {
+                    "status": "error",
+                    "error": "无浏览器tab，请先启动一个浏览器tab，并确认插件脚本已启用",
+                }
+        except Exception as e:
             return {
                 "status": "error",
-                "error": "无浏览器tab，请先启动一个浏览器tab，并确认插件脚本已启用",
+                "error": str(e),
             }
-        tabs = _get_tabs(driver)
+        try:
+            tabs = driver.get_session_dict()
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
         if switch_tab_id:
+            if switch_tab_id not in tabs:
+                return {"status": "fail", "error": f"tab 不存在: {switch_tab_id}"}
             driver.active_session_id = switch_tab_id
-        if driver.active_session_id is None and tabs:
-            driver.active_session_id = tabs[0].get("id")
-        metadata_obj = {
-            "tabs_count": len(tabs),
-            "active_tab": driver.active_session_id,
-            "tabs": tabs,
-        }
-        result = {"metadata": json.dumps(metadata_obj, ensure_ascii=False)}
+        tabs_info = format_tabs_info(tabs, active_tab_id=driver.active_session_id, url_max_len=200)
         session_id = driver.active_session_id
         content = ""
         if mode == "tabs_only":
@@ -124,8 +93,11 @@ def web_scan(switch_tab_id: str | None = None, mode: str = "simplified_html", ma
         elif mode == "text_only":
             content = _post_process_text_only(_get_text_only_js(driver, session_id=session_id))
         else:
-            return {"status": "error", "error": f"不支持的 mode: {mode}"}
-        result["content"] = content if max_chars <= 0 else content[:max_chars]
-        return {"status": "success", "result": _to_xml(result)}
+            return {"status": "fail", "error": f"不支持的 mode: {mode}"}
+        if content:
+            result_str = xml_wrap("tabs_info", tabs_info) + "\n" + xml_wrap(f"html (mode={mode})", content)
+        else:
+            result_str = tabs_info
+        return {"status": "success", "result": result_str}
     except Exception as e:
-        return {"status": "error", "error": f"{type(e).__name__}: {str(e)}"}
+        return {"status": "error", "error": str(e)}

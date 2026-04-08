@@ -23,6 +23,42 @@
     if (document.querySelector('[data-testid="stApp"],.stApp')) {
         return;
     }
+    const isTop = window.self === window.top;
+
+    const RPC_TOKEN_KEY = "ea_rpc_token";
+    function getRpcToken() {
+        let t = null;
+        try {
+            t = GM_getValue(RPC_TOKEN_KEY);
+        } catch {
+        }
+        if (!t) {
+            try {
+                if (window.crypto && typeof window.crypto.randomUUID === "function") {
+                    t = `ea_rpc_${window.crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
+                } else {
+                    t = `ea_rpc_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
+                }
+            } catch {
+                t = `ea_rpc_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
+            }
+            try {
+                GM_setValue(RPC_TOKEN_KEY, t);
+            } catch {
+            }
+        }
+        return String(t);
+    }
+
+    function genRpcId() {
+        try {
+            if (window.crypto && typeof window.crypto.randomUUID === "function") {
+                return `ea_msg_${window.crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
+            }
+        } catch {
+        }
+        return `ea_msg_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
+    }
 
     const wsUrl = "ws://127.0.0.1:18765";
     const httpUrl = "http://127.0.0.1:18766/";
@@ -111,13 +147,17 @@
         return `ea_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
     }
 
-    if (window.opener && window.name && String(window.name).startsWith("ea_")) {
-        window.name = "";
-    }
-    sid = window.name && String(window.name).startsWith("ea_") ? String(window.name) : null;
-    if (!sid) {
-        sid = genSid();
-        window.name = sid;
+    if (isTop) {
+        if (window.opener && window.name && String(window.name).startsWith("ea_")) {
+            window.name = "";
+        }
+        sid = window.name && String(window.name).startsWith("ea_") ? String(window.name) : null;
+        if (!sid) {
+            sid = genSid();
+            window.name = sid;
+        }
+    } else {
+        sid = null;
     }
 
     let statusEl;
@@ -324,53 +364,150 @@
         return e instanceof SyntaxError && (/await is only valid in async/i.test(e.message) || /await.*async/i.test(e.message));
     }
 
-    function executeCode(data) {
-        let result;
+    async function executeCode(data) {
+        let result = null;
         if (!data.code) {
             return { error: new Error("No code") };
         }
-        updateStatus("exec");
+        if (isTop) {
+            updateStatus("exec");
+        }
         const _open = window.open;
-        window.open = (url, target, features) => {
-            GM_openInTab(url, { active: true });
-            return { success: true, url: url };
-        };
+        if (isTop) {
+            window.open = (url, target, features) => {
+                GM_openInTab(url, { active: true });
+                return { success: true, url: url };
+            };
+        }
         try {
             const jsCode = String(data.code || "").trim();
             const lines = jsCode.split(/\r?\n/).filter((l) => l.trim());
             const lastLine = lines.length > 0 ? lines[lines.length - 1].trim() : "";
+            const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
             if (lastLine.startsWith("return")) {
-                result = new Function(jsCode)();
+                result = await new AsyncFunction(jsCode)();
             } else {
                 try {
                     result = eval(jsCode);
+                    if (result instanceof Promise) {
+                        result = await result;
+                    }
                 } catch (e) {
-                    if (isIllegalReturnError(e)) {
-                        result = new Function(jsCode)();
-                    } else if (isAwaitError(e)) {
-                        (async function () {
-                            return eval(jsCode);
-                        })();
-                        result =
-                            "Promise is running, cannot get return value. Suggest avoiding await, or store async result to window.*";
+                    if (isIllegalReturnError(e) || isAwaitError(e)) {
+                        result = await new AsyncFunction(jsCode)();
                     } else {
                         throw e;
                     }
                 }
             }
             const processed = smartProcessResult(result);
-            if (result instanceof Promise) {
-                result.finally(() => (window.open = _open));
-                return { result: processed };
-            }
             return { result: processed };
         } catch (execError) {
             return { error: execError };
         } finally {
-            if (!(result instanceof Promise)) {
+            if (isTop) {
                 setTimeout(() => (window.open = _open), 100);
             }
         }
+    }
+
+    const rpcToken = getRpcToken();
+    if (!window.EvoAgentDriver) {
+        window.EvoAgentDriver = {};
+    }
+    window.EvoAgentDriver.execInFrames = async function (code, opts) {
+        const timeoutMs = opts && typeof opts.timeoutMs === "number" ? opts.timeoutMs : 1500;
+        const targets = [];
+        try {
+            for (let i = 0; i < window.frames.length; i++) {
+                targets.push({ i, win: window.frames[i] });
+            }
+        } catch {
+        }
+        if (!targets.length) {
+            return [];
+        }
+        const pending = new Map();
+        const results = [];
+        return await new Promise((resolve) => {
+            const onMessage = (e) => {
+                const d = e && e.data;
+                if (!d || d.type !== "ea_result" || d.token !== rpcToken) {
+                    return;
+                }
+                const info = pending.get(d.id);
+                if (!info) {
+                    return;
+                }
+                pending.delete(d.id);
+                if (d.error) {
+                    results.push({ frameIndex: info.frameIndex, ok: false, error: d.error });
+                } else {
+                    results.push({ frameIndex: info.frameIndex, ok: true, result: d.result });
+                }
+                if (pending.size === 0) {
+                    window.removeEventListener("message", onMessage);
+                    clearTimeout(timer);
+                    resolve(results);
+                }
+            };
+            window.addEventListener("message", onMessage);
+            for (const t of targets) {
+                const id = genRpcId();
+                pending.set(id, { frameIndex: t.i });
+                try {
+                    t.win.postMessage({ type: "ea_exec", token: rpcToken, id, code: String(code || "") }, "*");
+                } catch {
+                    pending.delete(id);
+                    results.push({ frameIndex: t.i, ok: false, error: { name: "PostMessageError", message: "postMessage failed" } });
+                }
+            }
+            const timer = setTimeout(() => {
+                for (const [id, info] of pending.entries()) {
+                    pending.delete(id);
+                    results.push({ frameIndex: info.frameIndex, ok: false, error: { name: "TimeoutError", message: "frame exec timeout" } });
+                }
+                window.removeEventListener("message", onMessage);
+                resolve(results);
+            }, timeoutMs);
+        });
+    };
+
+    function setupIframeBridge() {
+        window.addEventListener("message", async (e) => {
+            const d = e && e.data;
+            if (!d || d.type !== "ea_exec" || d.token !== rpcToken) {
+                return;
+            }
+            const id = d.id || "unknown";
+            try {
+                const resp = await executeCode({ code: d.code });
+                if (resp && resp.error) {
+                    const err = resp.error;
+                    parent.postMessage(
+                        {
+                            type: "ea_result",
+                            token: rpcToken,
+                            id,
+                            error: { name: err && err.name, message: err && err.message, stack: err && err.stack },
+                        },
+                        "*",
+                    );
+                } else {
+                    parent.postMessage({ type: "ea_result", token: rpcToken, id, result: resp.result }, "*");
+                }
+            } catch (err) {
+                parent.postMessage(
+                    {
+                        type: "ea_result",
+                        token: rpcToken,
+                        id,
+                        error: { name: err && err.name, message: err && err.message, stack: err && err.stack },
+                    },
+                    "*",
+                );
+            }
+        });
     }
 
     function connectHttp() {
@@ -393,7 +530,7 @@
                 title: document.title || "",
             }),
             timeout: 8000,
-            onload: function (resp) {
+            onload: async function (resp) {
                 httpInFlight = false;
                 try {
                     if (resp.status !== 200) {
@@ -417,7 +554,7 @@
                     if (data.id === "") {
                         return;
                     }
-                    const response = executeCode(data);
+                    const response = await executeCode(data);
                     if (response.error) {
                         handleError(data.id, response.error, "exec");
                     } else {
@@ -534,11 +671,11 @@
             refreshConnStatus();
         };
 
-        ws.onmessage = function (e) {
+        ws.onmessage = async function (e) {
             try {
                 const data = JSON.parse(e.data);
                 ws.send(JSON.stringify({ type: "ack", id: data.id }));
-                const response = executeCode(data);
+                const response = await executeCode(data);
                 if (response.error) {
                     handleError(data.id, response.error, "exec");
                 } else {
@@ -575,12 +712,16 @@
         }
     }
 
-    if (document.readyState !== "loading") {
-        init();
-    } else {
-        document.addEventListener("DOMContentLoaded", () => {
+    if (isTop) {
+        if (document.readyState !== "loading") {
             init();
-        });
+        } else {
+            document.addEventListener("DOMContentLoaded", () => {
+                init();
+            });
+        }
+    } else {
+        setupIframeBridge();
     }
 
     window.addEventListener("beforeunload", () => {

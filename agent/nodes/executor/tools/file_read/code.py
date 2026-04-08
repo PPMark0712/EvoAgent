@@ -14,8 +14,12 @@ def file_read(file_path: str, start_line: int = None, end_line: int = None, line
             except (UnicodeDecodeError, LookupError):
                 continue
         if start_line is not None:
+            if not isinstance(start_line, int) or start_line <= 0:
+                return {"status": "error", "error": "start_line must be a positive integer"}
             lines = lines[start_line - 1:]
         if end_line is not None:
+            if not isinstance(end_line, int) or end_line <= 0:
+                return {"status": "error", "error": "end_line must be a positive integer"}
             lines = lines[:end_line - (start_line - 1 if start_line is not None else 0)]
         if line_number:
             start = start_line if start_line is not None else 1

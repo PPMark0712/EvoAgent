@@ -117,7 +117,7 @@ export async function onEventMessage(e) {
         aiMsg && aiMsg.data && aiMsg.data.additional_kwargs && aiMsg.data.additional_kwargs.special_tokens && typeof aiMsg.data.additional_kwargs.special_tokens === "object"
           ? aiMsg.data.additional_kwargs.special_tokens
           : state.specialTokens;
-      const inflight = aiMsg && toolcallDominates(aiText, aiTokens);
+      const inflight = !interrupted && aiMsg && toolcallDominates(aiText, aiTokens);
       state.inFlight = Boolean(inflight);
       state.inFlightRunId = inflight ? String(ev.run_id || "") : "";
       state.stopRequested = false;

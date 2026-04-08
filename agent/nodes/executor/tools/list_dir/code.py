@@ -65,11 +65,45 @@ def list_dir(dir_path: str, max_depth: int = 1, max_entries: int = 20, show_info
             depth_to_leaf, size = _subtree_info(path)
             return f"{name}/ (depth={depth_to_leaf}, size={size})"
 
-        if show_info:
-            root_depth, root_size = _subtree_info(root)
-            lines: list[str] = [f"{root}/ (depth={root_depth}, size={root_size})"]
-        else:
-            lines = [f"{root}/"]
+        lines: list[str] = []
+        if max_depth != 1:
+            if show_info:
+                root_depth, root_size = _subtree_info(root)
+                lines = [f"{root}/ (depth={root_depth}, size={root_size})"]
+            else:
+                lines = [f"{root}/"]
+
+        if max_depth == 1:
+            children = _sorted_children(root)
+            for child in children:
+                if printed_entries >= max_entries:
+                    truncated = True
+                    lines.append("… (truncated, consider lower max_depth or larger max_entries)")
+                    break
+                try:
+                    is_dir = child.is_dir(follow_symlinks=False)
+                except OSError:
+                    is_dir = False
+
+                if is_dir:
+                    lines.append(_format_dir_label(child.path, 1))
+                else:
+                    lines.append(child.name)
+                printed_entries += 1
+
+            result_str = "\n".join(lines)
+
+            index_path = os.path.join(root, "index.md")
+            if os.path.isfile(index_path):
+                try:
+                    with open(index_path, "r", encoding="utf-8") as f:
+                        index_content = f.read().rstrip()
+                    if index_content:
+                        result_str += "\n\n[index.md]\n" + index_content + "\n"
+                except OSError:
+                    pass
+
+            return {"status": "success", "result": result_str}
 
         def _walk_dir(path: str, depth: int, prefix: str):
             nonlocal printed_entries, truncated

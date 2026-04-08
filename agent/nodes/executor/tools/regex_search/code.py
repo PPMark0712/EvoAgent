@@ -67,7 +67,7 @@ def regex_search(regex: str, file_path: str, path_only: bool = False, max_entrie
             with open(fp, "r", encoding="utf-8", errors="ignore") as f:
                 for idx, line in enumerate(f, start=1):
                     if pattern.search(line):
-                        matched_lines.append(f"{fp}:{idx}: {line.rstrip()}")
+                        matched_lines.append(f"{fp}, line {idx}: {line.rstrip()}")
                         if limit is not None and len(matched_lines) >= limit:
                             return {"status": "success", "result": "\n".join(matched_lines)}
         except Exception:

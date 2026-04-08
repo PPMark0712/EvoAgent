@@ -1,6 +1,6 @@
 {
     "name": "file_read",
-    "description": "Read content from a specified file, with optional line range and line numbering.",
+    "description": "Read content from a specified file, with optional line range and line numbering (line number 1-based).",
     "parameters": {
         "type": "object",
         "properties": {

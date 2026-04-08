@@ -301,9 +301,9 @@ class ExecutorNode(BaseNode):
         if max_tool_iters > 0:
             remaining = max_tool_iters - new_tool_iters
             if 1 <= remaining <= 3:
-                response_content += f"\n哈，toolcall轮次已接近上限，还剩{remaining}次，就必须回复用户。"
+                response_content += f"\ntoolcall轮次已接近上限，还剩{remaining}次，就必须回复用户。"
             elif remaining == 0:
-                response_content += "\n哈，toolcall轮次已达上限，下轮必须回复用户。"
+                response_content += "\ntoolcall轮次已达上限，下轮必须回复用户。"
 
         response = HumanMessage(content=response_content, additional_kwargs={"source": "tool"})
         self.emit_messages([response], "main")

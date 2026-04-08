@@ -166,7 +166,40 @@ def run_web(agent_cls, args, *, host: str = "127.0.0.1", port: int = 8000):
                 BaseNode.set_tool_runtime(ToolRuntime(ask_user=self.ask_user))
                 if self.agent is None:
                     raise RuntimeError("Agent is not ready")
-                self.agent._run_graph(extra_emitters=[self._broadcast], run_id=self.run_id, emit_to_terminal=False)
+                try:
+                    self.agent._run_graph(extra_emitters=[self._broadcast], run_id=self.run_id, emit_to_terminal=False)
+                except Exception:
+                    try:
+                        manager.mark_interrupted(self.run_dir)
+                    except Exception:
+                        pass
+                    self.halted = True
+                    BaseNode.request_interrupt(self.run_id)
+                    err_text = traceback.format_exc().rstrip()
+                    try:
+                        os.makedirs(os.path.join(self.run_dir, "logging", "messages"), exist_ok=True)
+                        path = os.path.join(self.run_dir, "logging", "messages", "messages.jsonl")
+                        with open(path, "a", encoding="utf-8") as fp:
+                            fp.write(
+                                json.dumps({"type": "system", "data": {"content": f"[run_error]\n{err_text}"}}, ensure_ascii=False)
+                                + "\n"
+                            )
+                    except Exception:
+                        pass
+                    try:
+                        self._broadcast(
+                            {
+                                "run_id": self.run_id,
+                                "type": "messages",
+                                "data": {
+                                    "message_type": "main",
+                                    "messages": [{"type": "system", "data": {"content": f"[run_error]\n{err_text}"}}],
+                                    "metadata": {"interrupted": True},
+                                },
+                            }
+                        )
+                    except Exception:
+                        pass
 
             threading.Thread(target=_run_agent, daemon=True).start()
 
@@ -565,7 +598,7 @@ def run_web(agent_cls, args, *, host: str = "127.0.0.1", port: int = 8000):
                             {
                                 "run_id": session.run_id,
                                 "type": "messages",
-                                "data": {"message_type": "main", "messages": history, "metadata": {"history": True}},
+                                "data": {"message_type": "main", "messages": history, "metadata": {"history": True, "interrupted": bool(session.halted)}},
                             },
                             ensure_ascii=False,
                         )
@@ -602,7 +635,7 @@ def run_web(agent_cls, args, *, host: str = "127.0.0.1", port: int = 8000):
                                 {
                                     "run_id": session.run_id,
                                     "type": "messages",
-                                    "data": {"message_type": "main", "messages": history, "metadata": {"history": True}},
+                                    "data": {"message_type": "main", "messages": history, "metadata": {"history": True, "interrupted": bool(session.halted)}},
                                 },
                                 ensure_ascii=False,
                             )
