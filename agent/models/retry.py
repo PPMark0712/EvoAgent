@@ -1,3 +1,4 @@
+import logging
 import time
 from typing import Any, Iterable
 
@@ -54,6 +55,7 @@ class RetryLLM:
                 last_err = e
                 if attempt >= self._max_retries:
                     raise
+                logging.warning(f"LLM call failed (attempt {attempt + 1}/{self._max_retries}), retry after {self._retry_delay}. {type(e).__name__}: {e}")
                 self._sleep()
         raise last_err
 
@@ -73,6 +75,7 @@ class RetryLLM:
                 last_err = e
                 if yielded or attempt >= self._max_retries:
                     raise
+                logging.warning(f"LLM call failed (attempt {attempt + 1}/{self._max_retries}), retry after {self._retry_delay}. {type(e).__name__}: {e}")
                 self._sleep()
         raise last_err
 
@@ -87,6 +90,7 @@ class RetryLLM:
                 last_err = e
                 if attempt >= self._max_retries:
                     raise
+                logging.warning(f"LLM call failed (attempt {attempt + 1}/{self._max_retries}), retry after {self._retry_delay}. {type(e).__name__}: {e}")
                 self._sleep()
         raise last_err
 
@@ -105,6 +109,7 @@ class RetryLLM:
                 last_err = e
                 if yielded or attempt >= self._max_retries:
                     raise
+                logging.warning(f"LLM call failed (attempt {attempt + 1}/{self._max_retries}), retry after {self._retry_delay}. {type(e).__name__}: {e}")
                 self._sleep()
         raise last_err
 
