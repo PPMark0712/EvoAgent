@@ -212,26 +212,46 @@ class ExecutorNode(BaseNode):
                 except Exception:
                     self.logger.error(f"Failed to change directory back to {prev_cwd}")
 
-    def _format_tool_results(self, tool_results: dict) -> str:
-        def _redact_sensitive(text: str) -> str:
-            s = str(text)
-            s = re.sub(r"\bsk-[A-Za-z0-9_-]{8,}\b", "sk-xxx(masked)", s)
-            s = re.sub(r"\bBearer\s+[A-Za-z0-9_\-\.=]{8,}\b", "Bearer abc123(masked)", s)
-            return s
+    def _format_tool_content(self, value: object) -> str:
+        s = "" if value is None else str(value)
+        s = re.sub(r"\bsk-[A-Za-z0-9_-]{8,}\b", "sk-xxx(masked)", s)
+        s = re.sub(r"\bBearer\s+[A-Za-z0-9_\-\.=]{8,}\b", "Bearer abc123(masked)", s)
+        max_chars = int(self.config.tool_result_max_chars or 0)
+        if max_chars > 0 and len(s) > max_chars:
+            s = s[:max_chars] + "...[Truncated]"
+        return s
 
+    def _format_tool_results(self, tool_results: list[dict]) -> str:
         formatted_results = "<tool_results>\n"
         for tool_result in tool_results:
             name = tool_result["name"]
             status = tool_result["status"]
             result_str = tool_result["result"] if status == "success" else tool_result["error"]
-            result_str = _redact_sensitive(str(result_str))
-            max_chars = self.config.tool_result_max_chars
-            if max_chars > 0 and len(result_str) > max_chars:
-                result_str = result_str[:max_chars] + "...[Truncated]"
+            result_str = self._format_tool_content(result_str)
             formatted_result = f"<{name}><status>{status}</status><return>\n{result_str}\n</return></{name}>"
             formatted_results += f"{formatted_result}\n"
         formatted_results += "</tool_results>"
         return formatted_results
+
+    def _format_tool_results_for_additional_kwargs(self, tool_results: list[dict]) -> list[dict]:
+        """
+        Store tool call execution info in message.additional_kwargs for later inspection.
+        Keep it JSON-serializable and size-bounded (redacted + truncated).
+        """
+
+        out: list[dict] = []
+        for tr in tool_results or []:
+            if not isinstance(tr, dict):
+                continue
+            name = tr.get("name")
+            status = tr.get("status")
+            payload: dict[str, object] = {"name": name, "status": status}
+            key = "result" if status == "success" else "error"
+            v = tr.get(key)
+            if v is not None:
+                payload[key] = self._format_tool_content(v)
+            out.append(payload)
+        return out
 
     def run(self, state: AgentState):
         self.check_interrupt()
@@ -258,7 +278,13 @@ class ExecutorNode(BaseNode):
                 elif remaining == 0:
                     content += "\ntoolcall轮次已达上限，下轮必须回复用户。"
 
-            response = HumanMessage(content=content, additional_kwargs={"source": "tool"})
+            response = HumanMessage(
+                content=content,
+                additional_kwargs={
+                    "source": "tool",
+                    "tool_parse_error": f"{type(e).__name__}: {str(e)}",
+                },
+            )
             self.emit_messages([response], "main")
             state_update = {
                 "continuous_tool_error": continuous_tool_error,
@@ -305,7 +331,14 @@ class ExecutorNode(BaseNode):
             elif remaining == 0:
                 response_content += "\ntoolcall轮次已达上限，下轮必须回复用户。"
 
-        response = HumanMessage(content=response_content, additional_kwargs={"source": "tool"})
+        response = HumanMessage(
+            content=response_content,
+            additional_kwargs={
+                "source": "tool",
+                "tool_calls": tool_calls,
+                "tool_results": self._format_tool_results_for_additional_kwargs(tool_results),
+            },
+        )
         self.emit_messages([response], "main")
         next_continuous_tool_error = continuous_tool_error + 1 if is_error else 0
         state_update = {
