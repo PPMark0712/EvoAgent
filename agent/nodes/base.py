@@ -1,5 +1,9 @@
 import logging
 import os
+try:
+    import readline
+except ImportError:
+    pass
 import threading
 from abc import ABC, abstractmethod
 from typing import Any, Callable

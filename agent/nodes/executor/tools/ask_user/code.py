@@ -1,4 +1,7 @@
-import readline
+try:
+    import readline
+except ImportError:
+    pass
 from ..runtime import ToolRuntime
 
 _runtime: ToolRuntime | None = None
